@@ -233,6 +233,26 @@ export const VNPayService = {
       console.error('Error parsing VNPay date:', error);
       return null;
     }
+  },
+
+  /**
+   * Xác thực chữ ký từ VNPay (dùng cho IPN callback)
+   */
+  verifySignature(vnpParams: Record<string, string>): boolean {
+    try {
+      // Ép kiểu dữ liệu để tương thích với ReturnQueryFromVNPay
+      const returnData = vnpParams as unknown as ReturnQueryFromVNPay;
+      
+      // Sử dụng thư viện vnpay để xác thực chữ ký
+      // Chuyển đổi kết quả sang boolean bằng cách ép kiểu
+      const result = vnpay.verifyReturnUrl(returnData);
+      
+      // Chuyển đổi result thành boolean một cách an toàn
+      return Boolean(result);
+    } catch (error) {
+      console.error('Error verifying VNPay signature:', error);
+      return false;
+    }
   }
 };
 
