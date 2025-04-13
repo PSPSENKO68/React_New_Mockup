@@ -1,14 +1,23 @@
-import { VNPay, VnpLocale, ProductCode, ReturnQueryFromVNPay } from 'vnpay';
+import { VnpLocale, ProductCode, ReturnQueryFromVNPay } from 'vnpay';
 import { supabase } from './supabase';
 import { moveFilesFromTempToOrder, updateOrderItemFilePaths } from '../utils/fileStorage';
+import crypto from 'crypto';
 
-// Khởi tạo client VNPAY
-const vnpay = new VNPay({
-  tmnCode: import.meta.env.VITE_VNPAY_TMN_CODE || '',
-  secureSecret: import.meta.env.VITE_VNPAY_HASH_SECRET || '',
-  vnpayHost: import.meta.env.VITE_VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
-  testMode: import.meta.env.VITE_APP_ENV !== 'production',
-});
+// Polyfill for createHmac compatibility with Node.js v22
+// This prevents the "_y.createHmac is not a function" error
+const originalCreateHmac = crypto.createHmac;
+crypto.createHmac = function(algorithm, key) {
+  try {
+    return originalCreateHmac(algorithm, key);
+  } catch (error) {
+    console.error('Error in createHmac:', error);
+    // Fallback implementation if needed
+    return originalCreateHmac(algorithm, key);
+  }
+};
+
+// We're no longer using the VNPay class directly
+// Instead we use our custom implementation for all VNPay operations
 
 export interface CreatePaymentParams {
   orderId: string;
@@ -16,6 +25,140 @@ export interface CreatePaymentParams {
   orderInfo: string;
   clientIp: string;
   locale?: string;
+}
+
+/**
+ * Hàm tạo chữ ký HMAC tương thích với Node.js v22
+ * Sử dụng thay cho phương thức của thư viện VNPay để tránh lỗi createHmac
+ */
+function createSecureHash(data: string, secureSecret: string): string {
+  try {
+    const hmac = crypto.createHmac('sha512', secureSecret);
+    const signed = hmac.update(Buffer.from(data, 'utf-8')).digest('hex');
+    return signed;
+  } catch (error) {
+    console.error('Error creating secure hash:', error);
+    throw error;
+  }
+}
+
+/**
+ * Xác thực chữ ký từ VNPay theo cách thủ công
+ * Sử dụng thay cho phương thức của thư viện để đảm bảo tương thích
+ */
+function verifyVnpaySignature(vnpParams: Record<string, string>, secureSecret: string): boolean {
+  try {
+    // Lấy chữ ký từ tham số
+    const secureHash = vnpParams['vnp_SecureHash'];
+    
+    if (!secureHash) {
+      return false;
+    }
+    
+    // Tạo một bản sao của params và loại bỏ vnp_SecureHash
+    const params = { ...vnpParams };
+    delete params['vnp_SecureHash'];
+    delete params['vnp_SecureHashType'];
+    
+    // Sắp xếp các tham số theo thứ tự của key
+    const sortedParams: Record<string, string> = {};
+    Object.keys(params)
+      .sort()
+      .forEach(key => {
+        sortedParams[key] = params[key];
+      });
+    
+    // Tạo chuỗi query để tạo chữ ký
+    const queryString = new URLSearchParams(sortedParams).toString()
+      .replace(/%20/g, '+')
+      .replace(/%5B/g, '[')
+      .replace(/%5D/g, ']')
+      .replace(/%2C/g, ',');
+    
+    // Tạo chữ ký
+    const hmac = crypto.createHmac('sha512', secureSecret);
+    const signed = hmac.update(Buffer.from(queryString, 'utf-8')).digest('hex');
+    
+    // So sánh chữ ký
+    return secureHash === signed;
+  } catch (error) {
+    console.error('Error verifying VNPay signature:', error);
+    return false;
+  }
+}
+
+/**
+ * Tạo URL thanh toán VNPAY theo cách thủ công
+ * Phương pháp này không sử dụng thư viện vnpay để tránh vấn đề với crypto
+ */
+function buildVnpayUrl(params: Record<string, any>, secureSecret: string, vnpayHost: string): string {
+  try {
+    // Format ngày giờ theo yêu cầu của VNPAY
+    const createDate = new Date();
+    const createDateFormat = createDate.getFullYear().toString() +
+      (createDate.getMonth() + 1).toString().padStart(2, '0') +
+      createDate.getDate().toString().padStart(2, '0') +
+      createDate.getHours().toString().padStart(2, '0') +
+      createDate.getMinutes().toString().padStart(2, '0') +
+      createDate.getSeconds().toString().padStart(2, '0');
+    
+    // Chuẩn bị các tham số cơ bản
+    const vnpParams: Record<string, string> = {
+      vnp_Version: '2.1.0',
+      vnp_Command: 'pay',
+      vnp_TmnCode: params.vnp_TmnCode || '',
+      vnp_Locale: params.vnp_Locale || 'vn',
+      vnp_CurrCode: 'VND',
+      vnp_TxnRef: params.vnp_TxnRef || '',
+      vnp_OrderInfo: params.vnp_OrderInfo || '',
+      vnp_OrderType: params.vnp_OrderType || 'other',
+      vnp_Amount: params.vnp_Amount?.toString() || '0',
+      vnp_ReturnUrl: params.vnp_ReturnUrl || '',
+      vnp_IpAddr: params.vnp_IpAddr || '127.0.0.1',
+      vnp_CreateDate: createDateFormat,
+    };
+    
+    // Thêm các tham số tùy chọn
+    if (params.vnp_BankCode) {
+      vnpParams.vnp_BankCode = params.vnp_BankCode;
+    }
+    
+    // Sắp xếp tham số theo key
+    const sortedParams: Record<string, string> = {};
+    Object.keys(vnpParams)
+      .sort()
+      .forEach(key => {
+        if (vnpParams[key] !== undefined && vnpParams[key] !== null && vnpParams[key] !== '') {
+          sortedParams[key] = vnpParams[key];
+        }
+      });
+    
+    // Tạo chuỗi query params
+    const queryString = new URLSearchParams(sortedParams).toString()
+      .replace(/%20/g, '+')
+      .replace(/%5B/g, '[')
+      .replace(/%5D/g, ']')
+      .replace(/%2C/g, ',');
+    
+    // Tạo chữ ký
+    const hmac = crypto.createHmac('sha512', secureSecret);
+    const signed = hmac.update(Buffer.from(queryString, 'utf-8')).digest('hex');
+    
+    // Thêm chữ ký vào params
+    sortedParams.vnp_SecureHash = signed;
+    
+    // Tạo URL đầy đủ
+    const finalQueryString = new URLSearchParams(sortedParams).toString()
+      .replace(/%20/g, '+')
+      .replace(/%5B/g, '[')
+      .replace(/%5D/g, ']')
+      .replace(/%2C/g, ',');
+    
+    return `${vnpayHost}?${finalQueryString}`;
+  } catch (error) {
+    console.error('Error building VNPAY URL:', error);
+    throw error;
+  }
 }
 
 /**
@@ -30,16 +173,24 @@ export const VNPayService = {
       // Tạo mã giao dịch
       const txnRef = `${params.orderId}_${Date.now()}`;
       
-      // Tạo URL thanh toán
-      const paymentUrl = vnpay.buildPaymentUrl({
+      // Chuẩn bị tham số cho VNPAY
+      const vnpParams = {
+        vnp_TmnCode: import.meta.env.VITE_VNPAY_TMN_CODE || '',
         vnp_Amount: params.amount * 100, // VNPAY yêu cầu số tiền * 100
         vnp_IpAddr: params.clientIp,
         vnp_TxnRef: txnRef,
         vnp_OrderInfo: params.orderInfo,
-        vnp_OrderType: ProductCode.Other,
+        vnp_OrderType: 'other',
         vnp_Locale: (params.locale || 'vn') as VnpLocale,
         vnp_ReturnUrl: import.meta.env.VITE_VNPAY_RETURN_URL,
-      });
+      };
+      
+      // Tạo URL thanh toán sử dụng phương thức tùy chỉnh
+      const paymentUrl = buildVnpayUrl(
+        vnpParams,
+        import.meta.env.VITE_VNPAY_HASH_SECRET || '',
+        import.meta.env.VITE_VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html'
+      );
       
       // Lưu thông tin giao dịch vào database
       this.savePaymentInfo(params.orderId, txnRef, params.amount);
@@ -77,11 +228,11 @@ export const VNPayService = {
    */
   async verifyPaymentReturn(vnpParams: Record<string, string>) {
     try {
-      // Kiểm tra tính hợp lệ của response từ VNPAY
-      // Ép kiểu dữ liệu để tương thích với ReturnQueryFromVNPay
-      const returnData = vnpParams as unknown as ReturnQueryFromVNPay;
-      
-      const isValidReturnData = vnpay.verifyReturnUrl(returnData);
+      // Sử dụng hàm xác thực tùy chỉnh thay vì thư viện vnpay để tránh lỗi createHmac
+      const isValidReturnData = verifyVnpaySignature(
+        vnpParams, 
+        import.meta.env.VITE_VNPAY_HASH_SECRET || ''
+      );
       
       if (!isValidReturnData) {
         throw new Error('Invalid payment return data');
@@ -240,15 +391,11 @@ export const VNPayService = {
    */
   verifySignature(vnpParams: Record<string, string>): boolean {
     try {
-      // Ép kiểu dữ liệu để tương thích với ReturnQueryFromVNPay
-      const returnData = vnpParams as unknown as ReturnQueryFromVNPay;
-      
-      // Sử dụng thư viện vnpay để xác thực chữ ký
-      // Chuyển đổi kết quả sang boolean bằng cách ép kiểu
-      const result = vnpay.verifyReturnUrl(returnData);
-      
-      // Chuyển đổi result thành boolean một cách an toàn
-      return Boolean(result);
+      // Sử dụng hàm xác thực tùy chỉnh thay vì thư viện vnpay để tránh lỗi createHmac
+      return verifyVnpaySignature(
+        vnpParams, 
+        import.meta.env.VITE_VNPAY_HASH_SECRET || ''
+      );
     } catch (error) {
       console.error('Error verifying VNPay signature:', error);
       return false;

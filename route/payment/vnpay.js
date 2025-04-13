@@ -82,7 +82,7 @@ router.post('/create_payment_url', function (req, res, next) {
     let signData = querystring.stringify(vnp_Params, { encode: false });
     let crypto = require("crypto");     
     let hmac = crypto.createHmac("sha512", secretKey);
-    let signed = hmac.update(new Buffer(signData, 'utf-8')).digest("hex"); 
+    let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex"); 
     vnp_Params['vnp_SecureHash'] = signed;
     vnpUrl += '?' + querystring.stringify(vnp_Params, { encode: false });
 
@@ -107,7 +107,7 @@ router.get('/vnpay_return', function (req, res, next) {
     let signData = querystring.stringify(vnp_Params, { encode: false });
     let crypto = require("crypto");     
     let hmac = crypto.createHmac("sha512", secretKey);
-    let signed = hmac.update(new Buffer(signData, 'utf-8')).digest("hex");     
+    let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");     
 
     if(secureHash === signed){
         //Kiem tra xem du lieu trong db co hop le hay khong va thong bao ket qua
@@ -135,7 +135,7 @@ router.get('/vnpay_ipn', function (req, res, next) {
     let signData = querystring.stringify(vnp_Params, { encode: false });
     let crypto = require("crypto");     
     let hmac = crypto.createHmac("sha512", secretKey);
-    let signed = hmac.update(new Buffer(signData, 'utf-8')).digest("hex");     
+    let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");     
     
     let paymentStatus = '0'; // Giả sử '0' là trạng thái khởi tạo giao dịch, chưa có IPN. Trạng thái này được lưu khi yêu cầu thanh toán chuyển hướng sang Cổng thanh toán VNPAY tại đầu khởi tạo đơn hàng.
     //let paymentStatus = '1'; // Giả sử '1' là trạng thái thành công bạn cập nhật sau IPN được gọi và trả kết quả về nó
@@ -208,7 +208,7 @@ router.post('/querydr', function (req, res, next) {
     let data = vnp_RequestId + "|" + vnp_Version + "|" + vnp_Command + "|" + vnp_TmnCode + "|" + vnp_TxnRef + "|" + vnp_TransactionDate + "|" + vnp_CreateDate + "|" + vnp_IpAddr + "|" + vnp_OrderInfo;
     
     let hmac = crypto.createHmac("sha512", secretKey);
-    let vnp_SecureHash = hmac.update(new Buffer(data, 'utf-8')).digest("hex"); 
+    let vnp_SecureHash = hmac.update(Buffer.from(data, 'utf-8')).digest("hex"); 
     
     let dataObj = {
         'vnp_RequestId': vnp_RequestId,
@@ -271,7 +271,7 @@ router.post('/refund', function (req, res, next) {
     
     let data = vnp_RequestId + "|" + vnp_Version + "|" + vnp_Command + "|" + vnp_TmnCode + "|" + vnp_TransactionType + "|" + vnp_TxnRef + "|" + vnp_Amount + "|" + vnp_TransactionNo + "|" + vnp_TransactionDate + "|" + vnp_CreateBy + "|" + vnp_CreateDate + "|" + vnp_IpAddr + "|" + vnp_OrderInfo;
     let hmac = crypto.createHmac("sha512", secretKey);
-    let vnp_SecureHash = hmac.update(new Buffer(data, 'utf-8')).digest("hex");
+    let vnp_SecureHash = hmac.update(Buffer.from(data, 'utf-8')).digest("hex");
     
      let dataObj = {
         'vnp_RequestId': vnp_RequestId,
