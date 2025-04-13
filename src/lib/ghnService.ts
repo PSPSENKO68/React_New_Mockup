@@ -378,7 +378,148 @@ export const GHNService = {
     };
     
     return statusMap[ghnStatus] || 'pending';
-  }
+  },
+
+  /**
+   * Đồng bộ hóa trạng thái đơn hàng từ GHN với database
+   * Sử dụng khi cần cập nhật thủ công hoặc sau khi phát hiện đơn hàng đã bị hủy trên GHN
+   */
+  async syncOrderStatuses() {
+    try {
+      console.log('Starting GHN order status synchronization');
+      
+      // Lấy danh sách đơn hàng có trạng thái không phải là "completed" hoặc "cancelled"
+      const { data: shippingData, error: shippingError } = await supabase
+        .from('shipping')
+        .select('orderCode, orderId')
+        .not('status', 'in', '(delivered,cancelled)')
+        .eq('provider', 'GHN');
+      
+      if (shippingError) throw shippingError;
+      
+      if (!shippingData || shippingData.length === 0) {
+        console.log('No active GHN orders found to sync');
+        return { success: true, message: 'No orders to sync' };
+      }
+      
+      console.log(`Found ${shippingData.length} active GHN orders to sync`);
+      
+      // Đồng bộ từng đơn hàng
+      const results = [];
+      for (const item of shippingData) {
+        try {
+          // Lấy thông tin đơn hàng từ GHN
+          const orderInfo = await GHNService.getOrderInfo(item.orderCode);
+          const ghnStatus = orderInfo.status;
+          const mappedStatus = GHNService.mapGHNStatus(ghnStatus);
+          
+          // Cập nhật trạng thái trong database
+          await supabase
+            .from('shipping')
+            .update({ status: mappedStatus })
+            .eq('orderCode', item.orderCode);
+          
+          // Nếu là đơn hàng đã hủy hoặc đã giao, cập nhật trạng thái đơn hàng chính
+          if (mappedStatus === 'cancelled' || mappedStatus === 'delivered') {
+            const orderStatus = mappedStatus === 'delivered' ? 'completed' : 'cancelled';
+            
+            await supabase
+              .from('orders')
+              .update({ 
+                status: orderStatus,
+                shipping_status: mappedStatus,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', item.orderId);
+            
+            console.log(`Updated order ${item.orderId} status to ${orderStatus} based on GHN status: ${ghnStatus}`);
+          }
+          
+          results.push({
+            orderCode: item.orderCode,
+            orderId: item.orderId,
+            originalStatus: ghnStatus,
+            mappedStatus: mappedStatus,
+            success: true
+          });
+        } catch (error: any) {
+          console.error(`Error syncing order ${item.orderCode}:`, error);
+          results.push({
+            orderCode: item.orderCode,
+            orderId: item.orderId,
+            error: error.message,
+            success: false
+          });
+        }
+      }
+      
+      return { 
+        success: true, 
+        total: shippingData.length,
+        successCount: results.filter(r => r.success).length,
+        failedCount: results.filter(r => !r.success).length,
+        results 
+      };
+    } catch (error: any) {
+      console.error('Error syncing GHN order statuses:', error);
+      return { success: false, message: error.message };
+    }
+  },
+
+  /**
+   * Đánh dấu đơn hàng đã bị hủy
+   * Sử dụng khi cần hủy đơn hàng thủ công trong hệ thống
+   */
+  async markOrderAsCancelled(orderId: string) {
+    try {
+      // Lấy thông tin shipping
+      const { data: shippingData, error: shippingError } = await supabase
+        .from('shipping')
+        .select('orderCode')
+        .eq('orderId', orderId)
+        .eq('provider', 'GHN')
+        .single();
+      
+      if (shippingError && shippingError.code !== 'PGRST116') {
+        // PGRST116 là lỗi không tìm thấy dữ liệu, không phải lỗi nghiêm trọng
+        throw shippingError;
+      }
+      
+      // Nếu có đơn GHN, thử hủy trên GHN
+      if (shippingData?.orderCode) {
+        try {
+          await GHNService.cancelOrder(shippingData.orderCode);
+          console.log(`Successfully cancelled GHN order: ${shippingData.orderCode}`);
+        } catch (cancelError: any) {
+          // Ghi log lỗi nhưng vẫn tiếp tục cập nhật database
+          console.error(`Error cancelling GHN order ${shippingData.orderCode}:`, cancelError.message);
+          
+          // Cập nhật trạng thái trong database cho shipping
+          await supabase
+            .from('shipping')
+            .update({ status: 'cancelled' })
+            .eq('orderCode', shippingData.orderCode);
+        }
+      }
+      
+      // Cập nhật trạng thái đơn hàng
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({ 
+          status: 'cancelled',
+          shipping_status: 'cancelled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', orderId);
+      
+      if (updateError) throw updateError;
+      
+      return { success: true, message: 'Order marked as cancelled' };
+    } catch (error: any) {
+      console.error('Error marking order as cancelled:', error);
+      return { success: false, message: error.message };
+    }
+  },
 };
 
 export default GHNService; 

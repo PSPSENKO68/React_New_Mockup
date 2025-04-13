@@ -1,4 +1,3 @@
-import { VnpLocale, ProductCode, ReturnQueryFromVNPay } from 'vnpay';
 import { supabase } from './supabase';
 import { moveFilesFromTempToOrder, updateOrderItemFilePaths } from '../utils/fileStorage';
 import crypto from 'crypto';
@@ -27,9 +26,11 @@ export interface CreatePaymentParams {
   locale?: string;
 }
 
+// Type definitions that were previously imported from vnpay
+export type VnpLocale = 'vn' | 'en';
+
 /**
- * Hàm tạo chữ ký HMAC tương thích với Node.js v22
- * Sử dụng thay cho phương thức của thư viện VNPay để tránh lỗi createHmac
+ * Hàm tạo chữ ký HMAC bằng sha512
  */
 function createSecureHash(data: string, secureSecret: string): string {
   try {
@@ -43,8 +44,32 @@ function createSecureHash(data: string, secureSecret: string): string {
 }
 
 /**
- * Xác thực chữ ký từ VNPay theo cách thủ công
- * Sử dụng thay cho phương thức của thư viện để đảm bảo tương thích
+ * Sắp xếp tham số theo thứ tự alphabet của key
+ */
+function sortObject(obj: Record<string, any>): Record<string, string> {
+  const sorted: Record<string, string> = {};
+  const str: string[] = [];
+  
+  // Push all keys to an array
+  Object.keys(obj).forEach(key => {
+    if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+      str.push(encodeURIComponent(key));
+    }
+  });
+  
+  // Sort the keys
+  str.sort();
+  
+  // Create new object with sorted keys
+  str.forEach(key => {
+    sorted[key] = encodeURIComponent(obj[decodeURIComponent(key)]).replace(/%20/g, "+");
+  });
+  
+  return sorted;
+}
+
+/**
+ * Xác thực chữ ký từ VNPay
  */
 function verifyVnpaySignature(vnpParams: Record<string, string>, secureSecret: string): boolean {
   try {
@@ -60,20 +85,13 @@ function verifyVnpaySignature(vnpParams: Record<string, string>, secureSecret: s
     delete params['vnp_SecureHash'];
     delete params['vnp_SecureHashType'];
     
-    // Sắp xếp các tham số theo thứ tự của key
-    const sortedParams: Record<string, string> = {};
-    Object.keys(params)
-      .sort()
-      .forEach(key => {
-        sortedParams[key] = params[key];
-      });
+    // Sắp xếp các tham số
+    const sortedParams = sortObject(params);
     
-    // Tạo chuỗi query để tạo chữ ký
-    const queryString = new URLSearchParams(sortedParams).toString()
-      .replace(/%20/g, '+')
-      .replace(/%5B/g, '[')
-      .replace(/%5D/g, ']')
-      .replace(/%2C/g, ',');
+    // Chuyển thành chuỗi query để tạo chữ ký
+    const queryString = Object.entries(sortedParams)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&');
     
     // Tạo chữ ký
     const hmac = crypto.createHmac('sha512', secureSecret);
@@ -88,8 +106,7 @@ function verifyVnpaySignature(vnpParams: Record<string, string>, secureSecret: s
 }
 
 /**
- * Tạo URL thanh toán VNPAY theo cách thủ công
- * Phương pháp này không sử dụng thư viện vnpay để tránh vấn đề với crypto
+ * Tạo URL thanh toán VNPAY
  */
 function buildVnpayUrl(params: Record<string, any>, secureSecret: string, vnpayHost: string): string {
   try {
@@ -123,36 +140,24 @@ function buildVnpayUrl(params: Record<string, any>, secureSecret: string, vnpayH
       vnpParams.vnp_BankCode = params.vnp_BankCode;
     }
     
-    // Sắp xếp tham số theo key
-    const sortedParams: Record<string, string> = {};
-    Object.keys(vnpParams)
-      .sort()
-      .forEach(key => {
-        if (vnpParams[key] !== undefined && vnpParams[key] !== null && vnpParams[key] !== '') {
-          sortedParams[key] = vnpParams[key];
-        }
-      });
+    // Sắp xếp tham số
+    const sortedParams = sortObject(vnpParams);
     
-    // Tạo chuỗi query params
-    const queryString = new URLSearchParams(sortedParams).toString()
-      .replace(/%20/g, '+')
-      .replace(/%5B/g, '[')
-      .replace(/%5D/g, ']')
-      .replace(/%2C/g, ',');
+    // Chuyển thành chuỗi query để tạo chữ ký
+    const queryString = Object.entries(sortedParams)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&');
     
     // Tạo chữ ký
-    const hmac = crypto.createHmac('sha512', secureSecret);
-    const signed = hmac.update(Buffer.from(queryString, 'utf-8')).digest('hex');
+    const signed = createSecureHash(queryString, secureSecret);
     
     // Thêm chữ ký vào params
-    sortedParams.vnp_SecureHash = signed;
+    const paramsWithHash = { ...sortedParams, vnp_SecureHash: signed };
     
     // Tạo URL đầy đủ
-    const finalQueryString = new URLSearchParams(sortedParams).toString()
-      .replace(/%20/g, '+')
-      .replace(/%5B/g, '[')
-      .replace(/%5D/g, ']')
-      .replace(/%2C/g, ',');
+    const finalQueryString = Object.entries(paramsWithHash)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&');
     
     return `${vnpayHost}?${finalQueryString}`;
   } catch (error) {
@@ -181,11 +186,11 @@ export const VNPayService = {
         vnp_TxnRef: txnRef,
         vnp_OrderInfo: params.orderInfo,
         vnp_OrderType: 'other',
-        vnp_Locale: (params.locale || 'vn') as VnpLocale,
+        vnp_Locale: params.locale || 'vn',
         vnp_ReturnUrl: import.meta.env.VITE_VNPAY_RETURN_URL,
       };
       
-      // Tạo URL thanh toán sử dụng phương thức tùy chỉnh
+      // Tạo URL thanh toán
       const paymentUrl = buildVnpayUrl(
         vnpParams,
         import.meta.env.VITE_VNPAY_HASH_SECRET || '',
@@ -228,7 +233,7 @@ export const VNPayService = {
    */
   async verifyPaymentReturn(vnpParams: Record<string, string>) {
     try {
-      // Sử dụng hàm xác thực tùy chỉnh thay vì thư viện vnpay để tránh lỗi createHmac
+      // Xác thực chữ ký
       const isValidReturnData = verifyVnpaySignature(
         vnpParams, 
         import.meta.env.VITE_VNPAY_HASH_SECRET || ''
@@ -391,7 +396,6 @@ export const VNPayService = {
    */
   verifySignature(vnpParams: Record<string, string>): boolean {
     try {
-      // Sử dụng hàm xác thực tùy chỉnh thay vì thư viện vnpay để tránh lỗi createHmac
       return verifyVnpaySignature(
         vnpParams, 
         import.meta.env.VITE_VNPAY_HASH_SECRET || ''
