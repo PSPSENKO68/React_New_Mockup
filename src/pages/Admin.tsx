@@ -23,14 +23,131 @@ const orders = [
 
 
 function Dashboard() {
-  const revenueData = {
-    daily: '$1,245.00',
-    weekly: '$8,760.00',
-    monthly: '$32,450.00',
-    totalOrders: 156,
-    pendingOrders: 12,
-    averageOrder: '$34.99',
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [dashboardData, setDashboardData] = useState({
+    dailyRevenue: 0,
+    weeklyRevenue: 0,
+    monthlyRevenue: 0,
+    totalOrders: 0,
+    pendingOrders: 0,
+    averageOrderValue: 0,
+  });
+  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  async function fetchDashboardData() {
+    try {
+      setLoading(true);
+      
+      // Fetch all orders
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (ordersError) throw ordersError;
+      
+      // Calculate metrics
+      const orders = ordersData || [];
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay()); // Start of current week (Sunday)
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      
+      // Only count delivered orders for revenue
+      const deliveredOrders = orders.filter(order => order.status === 'delivered');
+      
+      const dailyRevenue = deliveredOrders
+        .filter(order => new Date(order.created_at) >= startOfDay)
+        .reduce((sum, order) => sum + (order.total || 0), 0);
+        
+      const weeklyRevenue = deliveredOrders
+        .filter(order => new Date(order.created_at) >= startOfWeek)
+        .reduce((sum, order) => sum + (order.total || 0), 0);
+        
+      const monthlyRevenue = deliveredOrders
+        .filter(order => new Date(order.created_at) >= startOfMonth)
+        .reduce((sum, order) => sum + (order.total || 0), 0);
+      
+      const totalOrders = orders.length;
+      
+      const pendingOrders = orders.filter(order => 
+        order.status === 'pending' || order.status === 'processing'
+      ).length;
+      
+      // Calculate average order value from delivered orders to get accurate metrics
+      const averageOrderValue = deliveredOrders.length 
+        ? deliveredOrders.reduce((sum, order) => sum + (order.total || 0), 0) / deliveredOrders.length
+        : 0;
+      
+      setDashboardData({
+        dailyRevenue,
+        weeklyRevenue,
+        monthlyRevenue,
+        totalOrders,
+        pendingOrders,
+        averageOrderValue,
+      });
+      
+      // Get recent orders for the table (limit to 5 most recent)
+      if (orders.length > 0) {
+        const { data: ordersWithItems, error: itemsError } = await supabase
+          .from('orders')
+          .select(`
+            id,
+            full_name,
+            status,
+            total,
+            created_at,
+            order_items(
+              id,
+              quantity,
+              inventory_items(
+                phone_models(name),
+                case_types(name)
+              )
+            )
+          `)
+          .order('created_at', { ascending: false })
+          .limit(5);
+        
+        if (itemsError) throw itemsError;
+        setRecentOrders(ordersWithItems || []);
+      }
+      
+    } catch (err: any) {
+      console.error('Error fetching dashboard data:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Format currency for display
+  const formatCurrency = (amount: number) => {
+    return `$${amount.toFixed(2)}`;
   };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 text-red-500 p-4 rounded-lg">
+        {error}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -39,27 +156,27 @@ function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-gray-500 mb-2">Daily Revenue</h3>
-          <p className="text-3xl font-bold">{revenueData.daily}</p>
+          <p className="text-3xl font-bold">{formatCurrency(dashboardData.dailyRevenue)}</p>
         </div>
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-gray-500 mb-2">Weekly Revenue</h3>
-          <p className="text-3xl font-bold">{revenueData.weekly}</p>
+          <p className="text-3xl font-bold">{formatCurrency(dashboardData.weeklyRevenue)}</p>
         </div>
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-gray-500 mb-2">Monthly Revenue</h3>
-          <p className="text-3xl font-bold">{revenueData.monthly}</p>
+          <p className="text-3xl font-bold">{formatCurrency(dashboardData.monthlyRevenue)}</p>
         </div>
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-gray-500 mb-2">Total Orders</h3>
-          <p className="text-3xl font-bold">{revenueData.totalOrders}</p>
+          <p className="text-3xl font-bold">{dashboardData.totalOrders}</p>
         </div>
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-gray-500 mb-2">Pending Orders</h3>
-          <p className="text-3xl font-bold">{revenueData.pendingOrders}</p>
+          <p className="text-3xl font-bold">{dashboardData.pendingOrders}</p>
         </div>
         <div className="bg-white p-6 rounded-xl shadow-sm">
           <h3 className="text-gray-500 mb-2">Average Order Value</h3>
-          <p className="text-3xl font-bold">{revenueData.averageOrder}</p>
+          <p className="text-3xl font-bold">{formatCurrency(dashboardData.averageOrderValue)}</p>
         </div>
       </div>
 
@@ -78,22 +195,44 @@ function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {orders.map(order => (
-                <tr key={order.id} className="border-b">
-                  <td className="py-3">#{order.id}</td>
-                  <td className="py-3">{order.customer}</td>
-                  <td className="py-3">{order.product}</td>
-                  <td className="py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs ${
-                      order.status === 'Completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {order.status}
-                    </span>
+              {recentOrders.length > 0 ? (
+                recentOrders.map(order => (
+                  <tr key={order.id} className="border-b">
+                    <td className="py-3">#{order.id.substring(0, 8)}</td>
+                    <td className="py-3">{order.full_name}</td>
+                    <td className="py-3">
+                      {order.order_items && order.order_items.length > 0 ? (
+                        <div>
+                          {order.order_items[0].inventory_items?.phone_models?.name} - 
+                          {order.order_items[0].inventory_items?.case_types?.name}
+                          {order.order_items.length > 1 && ` + ${order.order_items.length - 1} more`}
+                        </div>
+                      ) : (
+                        "No items"
+                      )}
+                    </td>
+                    <td className="py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        order.status === 'delivered' ? 'bg-green-100 text-green-800' : 
+                        order.status === 'shipping' ? 'bg-blue-100 text-blue-800' :
+                        order.status === 'processing' ? 'bg-yellow-100 text-yellow-800' :
+                        order.status === 'pending' ? 'bg-gray-100 text-gray-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {order.status}
+                      </span>
+                    </td>
+                    <td className="py-3">{formatCurrency(order.total || 0)}</td>
+                    <td className="py-3">{new Date(order.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6} className="py-4 text-center text-gray-500">
+                    No orders found
                   </td>
-                  <td className="py-3">${order.total}</td>
-                  <td className="py-3">{order.date}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
@@ -1204,8 +1343,8 @@ function Orders() {
         .from('orders')
         .select(`
           id,
-          customer_name,
-          customer_email,
+          full_name,
+          email,
           status,
           total,
           created_at,
@@ -1274,17 +1413,17 @@ function Orders() {
                 <tbody>
                   {orders
                     .filter(order => 
-                      order.customer_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      order.customer_email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      order.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      order.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                       order.id.toString().includes(searchQuery)
                     )
                     .map(order => (
                     <tr key={order.id} className="border-b">
-                      <td className="py-3">#{order.id}</td>
+                      <td className="py-3">#{order.id.substring(0, 8)}</td>
                       <td className="py-3">
                         <div>
-                          <div className="font-medium">{order.customer_name}</div>
-                          <div className="text-sm text-gray-500">{order.customer_email}</div>
+                          <div className="font-medium">{order.full_name}</div>
+                          <div className="text-sm text-gray-500">{order.email}</div>
                         </div>
                       </td>
                       <td className="py-3">
