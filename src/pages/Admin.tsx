@@ -1858,12 +1858,12 @@ export function Admin() {
           {/* Main Content */}
           <div className="flex-1">
             <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/orders" element={<Orders />} />
-              <Route path="/inventory" element={<Inventory />} />
-              <Route path="/phone-models" element={<PhoneModels />} />
-              <Route path="/case-types" element={<CaseTypes />} />
-              <Route path="/admins" element={<AdminUsers />} />
+              <Route path="" element={<Dashboard />} />
+              <Route path="orders" element={<Orders />} />
+              <Route path="inventory" element={<Inventory />} />
+              <Route path="phone-models" element={<PhoneModels />} />
+              <Route path="case-types" element={<CaseTypes />} />
+              <Route path="admins" element={<AdminUsers />} />
             </Routes>
           </div>
         </div>
