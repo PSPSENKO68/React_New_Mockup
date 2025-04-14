@@ -416,37 +416,24 @@ export function Payment() {
 
       // Create order_items for each product
       const orderItemsData = items.map(item => {
-        // Kiểm tra xem item có phải là thiết kế tùy chỉnh không (có thuộc tính image)
-        if (item.image && typeof item.image === 'string') {
-          // Trích xuất design_id từ URL của ảnh
-          const imagePath = item.image;
-          
-          // Xác định URL cho file custom và mockup
-          let customUrl = null;
-          let mockupUrl = null;
-          
-          if (imagePath.includes('_mockup_')) {
-            mockupUrl = imagePath;
-            customUrl = imagePath.replace('_mockup_', '_custom_');
-          } else if (imagePath.includes('_custom_')) {
-            customUrl = imagePath;
-            mockupUrl = imagePath.replace('_custom_', '_mockup_');
-          }
-          
+        // Kiểm tra xem item có phải là thiết kế tùy chỉnh không (có customDesign hoặc mockup2D)
+        if (item.customDesign || item.mockup2D) {
           return {
             order_id: orderData.id,
-            custom_design_url: customUrl,
-            mockup_design_url: mockupUrl,
+            inventory_item_id: item.inventoryItemId,
+            custom_design_url: item.customDesign || null,
+            mockup_design_url: item.mockup2D || null,
             quantity: item.quantity || 1,
             price: item.price
           };
         } else {
           // Đây là sản phẩm thông thường
           return {
-            order_id: orderData.id,
+        order_id: orderData.id,
+        inventory_item_id: item.inventoryItemId,
             custom_design_url: null,
             mockup_design_url: null,
-            quantity: item.quantity || 1,
+        quantity: item.quantity || 1,
             price: item.price
           };
         }
