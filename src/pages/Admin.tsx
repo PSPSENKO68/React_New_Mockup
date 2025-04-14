@@ -10,16 +10,12 @@ import {
   Trash2,
   Search,
   Users,
-  Upload
+  Upload,
+  Download,
+  Loader
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-
-// Mock data for demonstration
-const orders = [
-  { id: 1, customer: 'John Doe', product: 'iPhone 15 Pro Case', status: 'Pending', total: 29.99, date: '2024-03-15' },
-  { id: 2, customer: 'Jane Smith', product: 'Galaxy S24 Case', status: 'Completed', total: 34.99, date: '2024-03-14' },
-];
-
+import JSZip from 'jszip';
 
 
 function Dashboard() {
@@ -1331,6 +1327,7 @@ function Orders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [downloadLoading, setDownloadLoading] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -1351,6 +1348,8 @@ function Orders() {
           order_items(
             id,
             quantity,
+            custom_design_url,
+            mockup_design_url,
             inventory_items(
               phone_models(name),
               case_types(name, price)
@@ -1368,10 +1367,110 @@ function Orders() {
     }
   }
 
+  async function downloadFile(filePath: string): Promise<Blob | null> {
+    try {
+      const { data, error } = await supabase.storage
+        .from('case-assets')
+        .download(filePath);
+      
+      if (error || !data) {
+        console.error('Error downloading file:', error);
+        return null;
+      }
+      
+      return data;
+    } catch (err: any) {
+      console.error('Error in downloadFile:', err);
+      return null;
+    }
+  }
+
+  async function downloadZipFile() {
+    try {
+      setDownloadLoading(true);
+      
+      // Create new JSZip instance
+      const zip = new JSZip();
+      
+      // Process all orders to find design files
+      const promises = [];
+      
+      for (const order of orders) {
+        if (!order.order_items) continue;
+        
+        for (const item of order.order_items) {
+          // Download mockup design if available
+          if (item.mockup_design_url) {
+            const mockupPromise = downloadFile(item.mockup_design_url)
+              .then((fileData: Blob | null) => {
+                if (fileData) {
+                  const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_mockup.png`;
+                  zip.file(fileName, fileData);
+                }
+              })
+              .catch((err: any) => console.error('Error downloading mockup file:', err));
+            
+            promises.push(mockupPromise);
+          }
+          
+          // Download custom design if available
+          if (item.custom_design_url) {
+            const customPromise = downloadFile(item.custom_design_url)
+              .then((fileData: Blob | null) => {
+                if (fileData) {
+                  const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_custom.png`;
+                  zip.file(fileName, fileData);
+                }
+              })
+              .catch((err: any) => console.error('Error downloading custom file:', err));
+            
+            promises.push(customPromise);
+          }
+        }
+      }
+      
+      // Wait for all downloads to complete
+      await Promise.all(promises);
+      
+      // Generate the zip file
+      const content = await zip.generateAsync({ type: 'blob' });
+      
+      // Create download link
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `order_designs_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      console.error('Error creating zip file:', err);
+      setError('Failed to download designs. Please try again.');
+    } finally {
+      setDownloadLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Orders</h2>
+        <button
+          onClick={downloadZipFile}
+          disabled={downloadLoading}
+          className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition"
+        >
+          {downloadLoading ? (
+            <>
+              <Loader className="w-4 h-4 animate-spin" />
+              <span>Downloading...</span>
+            </>
+          ) : (
+            <>
+              <Download className="w-4 h-4" />
+              <span>Download Designs</span>
+            </>
+          )}
+        </button>
       </div>
 
       {error && (
