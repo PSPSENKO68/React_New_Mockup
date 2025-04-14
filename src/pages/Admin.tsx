@@ -219,7 +219,9 @@ function Dashboard() {
                       </span>
                     </td>
                     <td className="py-3">{formatCurrency(order.total || 0)}</td>
-                    <td className="py-3">{new Date(order.created_at).toLocaleDateString()}</td>
+                    <td className="py-3">
+                      {new Date(order.created_at).toLocaleDateString()} {new Date(order.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    </td>
                   </tr>
                 ))
               ) : (
@@ -1328,10 +1330,17 @@ function Orders() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [downloadLoading, setDownloadLoading] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [filteredOrders, setFilteredOrders] = useState<any[]>([]);
 
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  useEffect(() => {
+    filterOrders();
+  }, [orders, searchQuery, startDate, endDate]);
 
   async function fetchOrders() {
     try {
@@ -1360,11 +1369,46 @@ function Orders() {
 
       if (error) throw error;
       setOrders(data || []);
+      setFilteredOrders(data || []);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  function filterOrders() {
+    let filtered = [...orders];
+    
+    // Filter by search query
+    if (searchQuery) {
+      filtered = filtered.filter(order => 
+        order.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.id.toString().includes(searchQuery)
+      );
+    }
+    
+    // Filter by start date
+    if (startDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+      filtered = filtered.filter(order => new Date(order.created_at) >= start);
+    }
+    
+    // Filter by end date
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      filtered = filtered.filter(order => new Date(order.created_at) <= end);
+    }
+    
+    setFilteredOrders(filtered);
+  }
+
+  function clearDateFilters() {
+    setStartDate('');
+    setEndDate('');
   }
 
   async function downloadFile(filePath: string): Promise<Blob | null> {
@@ -1481,8 +1525,8 @@ function Orders() {
 
       <div className="bg-white rounded-xl shadow-sm">
         <div className="p-6">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="flex-1 relative">
+          <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
+            <div className="flex-1 relative w-full">
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
@@ -1491,6 +1535,35 @@ function Orders() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
+            </div>
+            
+            <div className="flex items-center gap-3 w-full md:w-auto">
+              <div className="flex-1">
+                <label className="text-sm text-gray-500 mb-1 block">Start Date</label>
+                <input
+                  type="date"
+                  className="w-full p-2 border rounded-lg"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-sm text-gray-500 mb-1 block">End Date</label>
+                <input
+                  type="date"
+                  className="w-full p-2 border rounded-lg"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
+              {(startDate || endDate) && (
+                <button
+                  onClick={clearDateFilters}
+                  className="mt-6 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  Clear
+                </button>
+              )}
             </div>
           </div>
 
@@ -1510,13 +1583,7 @@ function Orders() {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders
-                    .filter(order => 
-                      order.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      order.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      order.id.toString().includes(searchQuery)
-                    )
-                    .map(order => (
+                  {filteredOrders.map(order => (
                     <tr key={order.id} className="border-b">
                       <td className="py-3">#{order.id.substring(0, 8)}</td>
                       <td className="py-3">
@@ -1544,10 +1611,17 @@ function Orders() {
                       </td>
                       <td className="py-3">${order.total.toFixed(2)}</td>
                       <td className="py-3">
-                        {new Date(order.created_at).toLocaleDateString()}
+                        {new Date(order.created_at).toLocaleDateString()} {new Date(order.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                       </td>
                     </tr>
                   ))}
+                  {filteredOrders.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-4 text-center text-gray-500">
+                        No orders found matching your filters
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
