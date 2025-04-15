@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -18,26 +18,6 @@ import {
 import { supabase } from '../lib/supabase';
 import JSZip from 'jszip';
 import { OrderDetail } from '../components/OrderDetail';
-import {
-  Accordion,
-  AccordionItem,
-  AccordionButton,
-  AccordionPanel,
-  AccordionIcon,
-  Button,
-  Table,
-  Thead,
-  Tr,
-  Th,
-  Tbody,
-  Td,
-  HStack,
-  Box,
-  TableContainer
-} from '@chakra-ui/react';
-import { FaPrint } from 'react-icons/fa';
-import { Icon } from '@chakra-ui/react';
-
 
 function Dashboard() {
   const [loading, setLoading] = useState(true);
