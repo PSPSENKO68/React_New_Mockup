@@ -2251,11 +2251,11 @@ export function CustomDesign() {
       const userId = getOrCreateAnonymousId();
       const timestamp = Date.now();
       
-      // Sử dụng designId được truyền vào hoặc tạo mới nếu chưa có
-      const designFileId = designId || existingId || `design_${timestamp}_${Math.random().toString(36).substring(2, 9)}`;
+      // Tạo một ID ngẫu nhiên ngắn cho định dạng tên file mới
+      const randomId = Math.random().toString(36).substring(2, 10);
       
-      // Tên file bao gồm design_id
-      const fileName = `${designFileId}_${designType}_${timestamp}.png`;
+      // Tên file theo định dạng mới: type_randomId_timestamp.png
+      const fileName = `${designType}_${randomId}_${timestamp}.png`;
       
       // Path in the storage - tổ chức theo thư mục người dùng
       const filePath = `temp/${userId}/${fileName}`;

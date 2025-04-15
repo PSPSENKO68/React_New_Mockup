@@ -13,6 +13,11 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import DebugInfo from './components/DebugInfo';
 import { Diagnostic } from './pages/Diagnostic';
 import { OrderConfirmation } from './pages/OrderConfirmation';
+import { Login } from './pages/Account/Login';
+import { Register } from './pages/Account/Register';
+import { Account } from './pages/Account';
+import { ConfirmEmail } from './pages/Account/ConfirmEmail';
+import { ConfirmError } from './pages/Account/ConfirmError';
 
 function App() {
   const location = useLocation();
@@ -34,6 +39,14 @@ function App() {
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/diagnostic" element={<Diagnostic />} />
             <Route path="/order-confirmation/:orderId" element={<OrderConfirmation />} />
+            
+            {/* Tài khoản người dùng */}
+            <Route path="/account" element={<Account />} />
+            <Route path="/account/login" element={<Login />} />
+            <Route path="/account/register" element={<Register />} />
+            <Route path="/account/confirm" element={<ConfirmEmail />} />
+            <Route path="/account/confirm-error" element={<ConfirmError />} />
+            
             <Route
               path="/admin/*"
               element={

@@ -1364,7 +1364,7 @@ function Orders() {
   };
 
   // Hàm xử lý thay đổi trạng thái đơn hàng
-  const handleStatusChange = async (orderId: string, newStatus: string, currentStatus: string): Promise<void> => {
+  const _handleStatusChange = async (orderId: string, newStatus: string, currentStatus: string): Promise<void> => {
     if (currentStatus === newStatus) return;
     
     try {
@@ -1458,67 +1458,6 @@ function Orders() {
       return null;
     }
   }
-
-  const downloadOrderItemDesigns = async (order: any, item: any): Promise<void> => {
-    try {
-      if (!item.custom_design_url && !item.mockup_design_url) {
-        alert('No designs available for this item');
-        return;
-      }
-
-      // Create new JSZip instance
-      const zip = new JSZip();
-      const promises: Promise<void>[] = [];
-      
-      // Download mockup design if available
-      if (item.mockup_design_url) {
-        const mockupPromise = downloadFile(item.mockup_design_url)
-          .then((fileData: Blob | null) => {
-            if (fileData) {
-              const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_mockup.png`;
-              zip.file(fileName, fileData);
-            }
-          })
-          .catch((err: any) => console.error('Error downloading mockup file:', err));
-        
-        promises.push(mockupPromise);
-      }
-      
-      // Download custom design if available
-      if (item.custom_design_url) {
-        const customPromise = downloadFile(item.custom_design_url)
-          .then((fileData: Blob | null) => {
-            if (fileData) {
-              const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_custom.png`;
-              zip.file(fileName, fileData);
-            }
-          })
-          .catch((err: any) => console.error('Error downloading custom file:', err));
-        
-        promises.push(customPromise);
-      }
-      
-      // Wait for all downloads to complete
-      await Promise.all(promises);
-      
-      // Generate the zip file
-      const content = await zip.generateAsync({ type: 'blob' });
-      
-      // Create download link
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(content);
-      const productName = item.inventory_items?.phone_models?.name 
-        ? `${item.inventory_items.phone_models.name}_${item.inventory_items.case_types?.name || 'Case'}`
-        : 'product';
-      link.download = `design_${productName}_${new Date().toISOString().split('T')[0]}.zip`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (err: any) {
-      console.error('Error downloading item designs:', err);
-      setError('Failed to download design. Please try again.');
-    }
-  };
 
   const downloadSelectedOrderDesigns = async (): Promise<void> => {
     try {
@@ -2404,7 +2343,6 @@ function CaseTypes() {
 
 export function Admin() {
   const location = useLocation();
-  const [currentTab, setCurrentTab] = useState(location.pathname.split('/')[2] || 'dashboard');
 
   const navigation = [
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },

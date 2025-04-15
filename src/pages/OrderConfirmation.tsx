@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, UserPlus } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface OrderDetail {
   id: string;
@@ -34,6 +35,7 @@ export function OrderConfirmation() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchOrderDetails();
@@ -187,6 +189,37 @@ export function OrderConfirmation() {
                 Cảm ơn bạn đã đặt hàng. Đơn hàng của bạn đã được xác nhận.
               </p>
             </div>
+
+            {/* Hiển thị thông báo đăng ký nếu chưa đăng nhập */}
+            {!user && order && order.email && (
+              <div className="bg-yellow-50 border border-yellow-100 rounded-lg p-4 mb-6">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <UserPlus className="h-5 w-5 text-yellow-500" />
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-yellow-800">
+                      Tạo tài khoản để dễ dàng theo dõi đơn hàng
+                    </h3>
+                    <div className="mt-2 text-sm text-yellow-700">
+                      <p>
+                        Đăng ký tài khoản để xem lịch sử đơn hàng của bạn trên mọi thiết bị.
+                        Email của bạn {order.email} sẽ được sử dụng để đăng ký.
+                      </p>
+                    </div>
+                    <div className="mt-3">
+                      <Link
+                        to="/account/register"
+                        className="inline-flex items-center gap-1 px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                      >
+                        <UserPlus className="h-4 w-4" />
+                        Đăng ký tài khoản
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="border-t border-b py-4 mb-6">
               <div className="flex justify-between items-center">

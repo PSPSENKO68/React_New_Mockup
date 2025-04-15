@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, ShoppingCart, X, Home, Palette, CreditCard, Phone } from 'lucide-react';
+import { Menu, ShoppingCart, X, Home, Palette, CreditCard, User } from 'lucide-react';
 import { useCart } from '../contexts/CartContext';
+import { useAuth } from '../contexts/AuthContext';
 
 export function Navigation() {
   const { cartCount } = useCart();
+  const { user } = useAuth();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
@@ -33,6 +35,10 @@ export function Navigation() {
     { path: '/custom-design', label: 'Design Your Case', icon: Palette },
     { path: '/cart', label: 'Cart', icon: ShoppingCart },
     { path: '/payment', label: 'Checkout', icon: CreditCard },
+    ...(user 
+      ? [{ path: '/account', label: 'Tài khoản của tôi', icon: User }] 
+      : [{ path: '/account/login', label: 'Đăng nhập', icon: User }]
+    ),
   ];
 
   const isActive = (path: string) => location.pathname === path;
@@ -86,14 +92,23 @@ export function Navigation() {
         
         <Link to="/" className="text-2xl font-bold">LYLYCASE</Link>
         
-        <Link to="/cart" className="relative">
-          <ShoppingCart className="h-6 w-6 cursor-pointer" />
-          {cartCount > 0 && (
-            <span className="absolute -top-2 -right-2 bg-black text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
-              {cartCount}
+        <div className="flex items-center gap-4">
+          <Link to={user ? '/account' : '/account/login'} className="flex items-center gap-1">
+            <User className="h-5 w-5" />
+            <span className="text-sm hidden md:inline">
+              {user ? 'Tài khoản' : 'Đăng nhập'}
             </span>
-          )}
-        </Link>
+          </Link>
+          
+          <Link to="/cart" className="relative">
+            <ShoppingCart className="h-6 w-6 cursor-pointer" />
+            {cartCount > 0 && (
+              <span className="absolute -top-2 -right-2 bg-black text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
+                {cartCount}
+              </span>
+            )}
+          </Link>
+        </div>
       </div>
     </nav>
   );

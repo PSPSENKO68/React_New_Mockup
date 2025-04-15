@@ -1,14 +1,14 @@
 import { useState, FormEvent, useEffect } from 'react';
-import { CreditCard, Truck, MapPin, AlertCircle } from 'lucide-react';
+import { CreditCard, Truck, MapPin, AlertCircle, User, UserPlus } from 'lucide-react';
 import { useCart } from '../contexts/CartContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getOrCreateAnonymousId } from '../utils/userIdentifier';
 import VNPayCheckout from '../components/VNPayCheckout';
 import GHNService from '../lib/ghnService';
-import getGHNConfig from '../lib/ghnConfig';
 import { moveFilesFromTempToOrder, updateOrderItemFilePaths } from '../utils/fileStorage';
 import { decreaseInventoryOnOrderCreation } from '../lib/inventoryManager';
+import { useAuth } from '../contexts/AuthContext';
 
 type PaymentMethod = 'cod' | 'vnpay';
 type ShippingMethod = 'standard' | 'express';
@@ -60,6 +60,7 @@ export function Payment() {
   const [showVNPayCheckout, setShowVNPayCheckout] = useState(false);
   const { items, clearCart } = useCart();
   const [orderCreated, setOrderCreated] = useState<string | null>(null);
+  const { user } = useAuth();
   
   // Location data
   const [provinces, setProvinces] = useState<LocationOption[]>([]);
@@ -77,6 +78,9 @@ export function Payment() {
   // Shipping fee calculation
   const [shippingFee, setShippingFee] = useState(0);
   const [calculatingFee, setCalculatingFee] = useState(false);
+  
+  // Profile data loading status
+  const [loadingUserProfile, setLoadingUserProfile] = useState(false);
 
   const [formData, setFormData] = useState({
     fullName: '',
@@ -393,7 +397,7 @@ export function Payment() {
     }
 
     // Validate form
-    const requiredFields = ['fullName', 'address', 'phoneNumber', 'provinceId', 'districtId', 'wardCode'];
+    const requiredFields = ['fullName', 'address', 'phoneNumber', 'email', 'provinceId', 'districtId', 'wardCode'];
     const missingFields = requiredFields.filter(field => !formData[field as keyof typeof formData]);
     
     if (missingFields.length > 0) {
@@ -409,7 +413,7 @@ export function Payment() {
     setIsLoading(true);
 
     try {
-      // Get anonymous user ID from cookie or session
+      // Get the anonymous ID or create a new one if not available
       const anonymousId = getOrCreateAnonymousId();
       
       // Get location names for order address
@@ -421,35 +425,36 @@ export function Payment() {
       const fullAddress = `${formData.address}, ${wardName}, ${districtName}, ${provinceName}`;
       
       console.log('Creating order with data:', {
-        anonymous_id: anonymousId,
         full_name: formData.fullName,
         shipping_address: fullAddress,
         phone_number: formData.phoneNumber,
-        email: formData.email || null,
+        email: formData.email,
         payment_method: paymentMethod,
-        payment_status: paymentMethod === 'cod' ? 'pending' : 'unpaid',
+        payment_status: 'pending',
         shipping_fee: shippingFee,
         subtotal: subtotal,
         total: total
       });
       
-      // Create new order
+      // Create order in database
       const { data: orderData, error: orderError } = await supabase
         .from('orders')
         .insert({
-          anonymous_id: anonymousId,
           full_name: formData.fullName,
           shipping_address: fullAddress,
           phone_number: formData.phoneNumber,
-          email: formData.email || null,
+          email: formData.email,
           payment_method: paymentMethod,
-          payment_status: paymentMethod === 'cod' ? 'pending' : 'unpaid',
+          payment_status: 'pending',
           shipping_fee: shippingFee,
           subtotal: subtotal,
           total: total,
           notes: formData.notes || null,
           status: 'pending',
-          has_ghn_order: false // Add this field to track if GHN order has been created
+          has_ghn_order: false,
+          // Use userId if logged in, otherwise store anonymousId
+          user_id: user ? user.id : null,
+          anonymous_id: !user ? anonymousId : null
         })
         .select('id')
         .single();
@@ -571,76 +576,51 @@ export function Payment() {
     }
   };
 
-  const createShippingOrder = async (orderId: string, fullAddress: string) => {
-    try {
-      // Get GHN config for shop_id
-      const config = getGHNConfig();
-      const shop_id = typeof config.shopId === 'string' ? parseInt(config.shopId, 10) : config.shopId;
-      
-      // Calculate total weight (in grams) - assume 100g per case
-      const weight = items.reduce((total, item) => total + ((item.quantity || 1) * 100), 0);
-      
-      // Convert prices from USD to VND (approximate exchange rate)
-      const totalInVND = Math.round(Number(total) * 23000);
-      const subtotalInVND = Math.round(Number(subtotal) * 23000);
-      
-      // Get province and district names for required fields
-      const provinceName = provinces.find(p => p.id === Number(formData.provinceId))?.name || '';
-      const districtName = districts.find(d => d.id === Number(formData.districtId))?.name || '';
-      
-      // Validate phone number format (must be Vietnamese format)
-      let phoneNumber = formData.phoneNumber;
-      if (!phoneNumber.startsWith('0') && !phoneNumber.startsWith('+84')) {
-        phoneNumber = `0${phoneNumber.replace(/^\+?84/, '')}`;
-      }
-      
-      // Prepare shipping order data for GHN
-      const shippingData = {
-        shop_id: shop_id,
-        orderId: orderId, // Custom field
-        to_name: formData.fullName,
-        to_phone: phoneNumber,
-        to_address: fullAddress,
-        to_ward_code: formData.wardCode,
-        to_district_id: Number(formData.districtId),
-        from_district_id: Number(import.meta.env.VITE_GHN_DISTRICT_ID || 1454), // Shop district
-        weight: Math.max(weight, 100), // Minimum 100g
-        length: 20,
-        width: 10,
-        height: 5,
-        payment_type_id: paymentMethod === 'cod' ? 2 : 1, // 2 for COD, 1 for pre-paid
-        service_id: 53320, // Standard delivery service
-        service_type_id: 2, // Standard service
-        required_note: 'CHOTHUHANG', // Allow checking goods before accepting
-        cod_amount: paymentMethod === 'cod' ? totalInVND : 0, // COD amount in VND
-        insurance_value: subtotalInVND, // Insure value in VND
-        note: formData.notes || 'Xin nhẹ tay',
-        items: items.map(item => ({
-          name: item.name || 'Sản phẩm',
-          quantity: item.quantity || 1,
-          price: Math.round((item.price || 0) * 23000)
-        }))
-      };
-      
-      console.log('Shipping data prepared:', shippingData);
-      
-      try {
-        // Create shipping order
-        await GHNService.createOrder(shippingData);
-        console.log("Đã tạo đơn hàng vận chuyển thành công");
-      } catch (error) {
-        console.error('GHN API Error:', error);
-        // Không throw lỗi, chỉ log thông tin
-      }
-    } catch (error) {
-      console.error('Error preparing shipping data:', error);
-      // Không throw lỗi, chỉ log thông tin
-    }
-  };
-
   const handleVNPaySuccess = (url: string) => {
     // Redirect to VNPay payment gateway
     window.location.href = url;
+  };
+
+  // Load user profile data when user is logged in
+  useEffect(() => {
+    if (user) {
+      fetchUserProfile();
+    }
+  }, [user]);
+  
+  // Fetch user profile data from Supabase
+  const fetchUserProfile = async () => {
+    if (!user) return;
+    
+    try {
+      setLoadingUserProfile(true);
+      
+      // Fetch user profile from the database
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      if (error) {
+        console.error('Error fetching user profile:', error);
+        return;
+      }
+      
+      if (data) {
+        // Pre-fill form with user data (only personal info, not address)
+        setFormData(prev => ({
+          ...prev,
+          fullName: data.full_name || prev.fullName,
+          phoneNumber: data.phone || prev.phoneNumber,
+          email: data.email || user.email || prev.email
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading user profile data:', error);
+    } finally {
+      setLoadingUserProfile(false);
+    }
   };
 
   return (
@@ -672,8 +652,6 @@ export function Payment() {
               <h2 className="text-xl font-semibold mb-4">Thanh toán với VNPAY</h2>
               <VNPayCheckout 
                 orderId={orderCreated}
-                amount={total}
-                orderInfo={`Thanh toan don hang #${orderCreated}`}
                 onPaymentCreated={handleVNPaySuccess}
                 onError={(err) => {
                   alert(`Lỗi thanh toán: ${err.message}`);
@@ -685,41 +663,99 @@ export function Payment() {
             <form onSubmit={handlePlaceOrder}>
               <div className="grid md:grid-cols-3 gap-8">
                 <div className="md:col-span-2 space-y-6">
+                  {/* User Account Information */}
+                  {!user && (
+                    <div className="bg-yellow-50 border-yellow-200 border p-4 rounded-lg mb-4">
+                      <div className="flex items-start">
+                        <div className="flex-shrink-0">
+                          <User className="h-5 w-5 text-yellow-400" />
+                        </div>
+                        <div className="ml-3">
+                          <h3 className="text-sm font-medium text-yellow-800">
+                            Đăng nhập là tùy chọn
+                          </h3>
+                          <div className="mt-2 text-sm text-yellow-700">
+                            <p>
+                              Bạn không cần đăng nhập để mua hàng. Tuy nhiên, email là bắt buộc để theo dõi đơn hàng. Nếu đăng nhập, bạn có thể xem toàn bộ lịch sử đơn hàng đã đặt với cùng email trong trang tài khoản.
+                            </p>
+                          </div>
+                          <div className="mt-3 flex space-x-2">
+                            <Link 
+                              to="/account/login" 
+                              className="flex items-center gap-1 bg-black text-white px-3 py-1.5 text-sm font-medium rounded-md"
+                            >
+                              <User className="h-4 w-4" />
+                              Đăng nhập
+                            </Link>
+                            <Link 
+                              to="/account/register" 
+                              className="flex items-center gap-1 bg-white border-black border text-black px-3 py-1.5 text-sm font-medium rounded-md"
+                            >
+                              <UserPlus className="h-4 w-4" />
+                              Đăng ký
+                            </Link>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Shipping Information */}
                   <div className="bg-white p-6 rounded-lg shadow-sm">
-                  <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                    <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                       <MapPin className="w-5 h-5" />
                       Thông tin giao hàng
-                  </h2>
+                    </h2>
+                    
+                    {/* Pre-fill form if user is logged in */}
+                    {user && (
+                      <div className="bg-green-50 border-green-200 border p-4 rounded-lg mb-4">
+                        <p className="text-green-800 text-sm">
+                          Đã đăng nhập với tài khoản: <span className="font-medium">{user.email}</span>
+                          {loadingUserProfile && (
+                            <span className="ml-2 inline-block">
+                              <span className="inline-block w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></span>
+                              <span className="ml-1">Đang tải thông tin...</span>
+                            </span>
+                          )}
+                        </p>
+                        {!loadingUserProfile && (
+                          <p className="text-green-700 text-xs mt-1">Thông tin cá nhân của bạn đã được điền tự động. Email sẽ được lấy từ tài khoản và không thể thay đổi. Vui lòng điền thông tin địa chỉ giao hàng.</p>
+                        )}
+                      </div>
+                    )}
+                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
                           Họ tên người nhận <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="fullName"
-                        value={formData.fullName}
-                        onChange={handleInputChange}
+                        </label>
+                        <input
+                          type="text"
+                          name="fullName"
+                          value={formData.fullName}
+                          onChange={handleInputChange}
                           className="w-full p-3 border border-gray-300 rounded-md"
                           placeholder="Nhập họ tên người nhận"
-                        required
-                      />
-                    </div>
-                    
+                          required
+                          disabled={loadingUserProfile}
+                        />
+                      </div>
+                      
                       <div className="col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-1">
                           Số điện thoại <span className="text-red-500">*</span>
                         </label>
-                          <input
-                            type="tel"
-                            name="phoneNumber"
-                            value={formData.phoneNumber}
-                            onChange={handleInputChange}
+                        <input
+                          type="tel"
+                          name="phoneNumber"
+                          value={formData.phoneNumber}
+                          onChange={handleInputChange}
                           className={`w-full p-3 border ${phoneError ? 'border-red-500' : 'border-gray-300'} rounded-md`}
                           placeholder="Nhập số điện thoại (VD: 0987654321)"
-                            required
-                          />
+                          required
+                          disabled={loadingUserProfile}
+                        />
                         {phoneError && (
                           <p className="mt-1 text-sm text-red-600 flex items-center">
                             <AlertCircle className="w-4 h-4 mr-1" /> {phoneError}
@@ -729,16 +765,23 @@ export function Payment() {
                       
                       <div className="col-span-2">
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Email
+                          Email <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="email"
                           name="email"
                           value={formData.email}
                           onChange={handleInputChange}
-                          className="w-full p-3 border border-gray-300 rounded-md"
-                          placeholder="Nhập email (không bắt buộc)"
+                          className={`w-full p-3 border border-gray-300 rounded-md ${user ? 'bg-gray-50' : ''}`}
+                          placeholder="Nhập email"
+                          required
+                          disabled={loadingUserProfile || !!user}
                         />
+                        {user && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Email được liên kết với tài khoản của bạn và không thể thay đổi.
+                          </p>
+                        )}
                       </div>
                       
                       <div className="md:col-span-1">
@@ -832,8 +875,8 @@ export function Payment() {
                           rows={3}
                         />
                       </div>
-                      </div>
                     </div>
+                  </div>
                     
                   {/* Payment Method */}
                   <div className="bg-white p-6 rounded-lg shadow-sm">

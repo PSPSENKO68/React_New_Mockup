@@ -23,6 +23,7 @@
     "body-parser": "^2.2.0",
     "config": "^3.3.12",
     "cors": "^2.8.5",
+    "date-fns": "^4.1.0",
     "express": "^5.1.0",
     "fabric": "^6.6.2",
     "framer-motion": "^12.7.3",
