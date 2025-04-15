@@ -88,6 +88,55 @@ export function Payment() {
     notes: ''
   });
 
+  // Add state for image URLs, similar to Cart component
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  
+  // Load public URLs for stored images when cart items change
+  useEffect(() => {
+    const loadImageUrls = async () => {
+      const urlMap: Record<string, string> = {};
+      
+      for (const item of items) {
+        // Process mockup2D paths
+        if (item.mockup2D && item.mockup2D.startsWith('temp/')) {
+          const { data } = supabase.storage
+            .from('case-assets')
+            .getPublicUrl(item.mockup2D);
+          
+          if (data.publicUrl) {
+            urlMap[item.mockup2D] = data.publicUrl + `?t=${Date.now()}`; // Add timestamp to force reload
+          }
+        }
+        
+        // Process customDesign paths
+        if (item.customDesign && item.customDesign.startsWith('temp/')) {
+          const { data } = supabase.storage
+            .from('case-assets')
+            .getPublicUrl(item.customDesign);
+          
+          if (data.publicUrl) {
+            urlMap[item.customDesign] = data.publicUrl + `?t=${Date.now()}`; // Add timestamp to force reload
+          }
+        }
+      }
+      
+      setImageUrls(urlMap);
+    };
+    
+    loadImageUrls();
+  }, [items]);
+  
+  // Helper function to get the correct image URL
+  const getImageUrl = (path: string | undefined): string | undefined => {
+    if (!path) return undefined;
+    if (path.startsWith('http')) return path;
+    if (path.startsWith('data:')) return path;
+    if (path.startsWith('temp/') && imageUrls[path]) return imageUrls[path];
+    
+    // Return a placeholder if image not found
+    return undefined;
+  };
+
   // Calculate subtotal from cart
   const subtotal = items.reduce((total, item) => {
     return total + (item.price * (item.quantity || 1));
@@ -398,7 +447,8 @@ export function Payment() {
           subtotal: subtotal,
           total: total,
           notes: formData.notes || null,
-          status: 'pending'
+          status: 'pending',
+          has_ghn_order: false // Add this field to track if GHN order has been created
         })
         .select('id')
         .single();
@@ -429,11 +479,11 @@ export function Payment() {
         } else {
           // Đây là sản phẩm thông thường
           return {
-        order_id: orderData.id,
-        inventory_item_id: item.inventoryItemId,
+            order_id: orderData.id,
+            inventory_item_id: item.inventoryItemId,
             custom_design_url: null,
             mockup_design_url: null,
-        quantity: item.quantity || 1,
+            quantity: item.quantity || 1,
             price: item.price
           };
         }
@@ -458,15 +508,15 @@ export function Payment() {
         // Show VNPay checkout component
         setShowVNPayCheckout(true);
       } else {
-        // COD payment - create shipping order in GHN only if API is available
-        if (apiAvailable) {
-          try {
-            await createShippingOrder(orderData.id, fullAddress);
-          } catch (error) {
-            console.error('Error creating shipping order:', error);
-            // Continue even if shipping creation fails
-          }
-        }
+        // COD payment - We no longer create GHN orders automatically
+        // if (apiAvailable) {
+        //   try {
+        //     await createShippingOrder(orderData.id, fullAddress);
+        //   } catch (error) {
+        //     console.error('Error creating shipping order:', error);
+        //     // Continue even if shipping creation fails
+        //   }
+        // }
         
         // Di chuyển file từ thư mục temp sang order khi đặt hàng thành công
         try {
@@ -887,14 +937,32 @@ export function Payment() {
                     <div className="mt-4">
                       <h3 className="font-medium mb-2">Đơn hàng của bạn ({items.length} sản phẩm)</h3>
                       <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {items.map(item => (
+                        {items.map((item) => (
                           <div key={item.id} className="flex items-center space-x-3 text-sm">
-                            <div className="w-10 h-10 bg-gray-100 rounded-md overflow-hidden">
-                              {item.image && (
+                            <div className="relative w-10 h-14 flex-shrink-0">
+                              {item.mockup2D ? (
+                                <div className="relative w-full h-full bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center">
+                                  <img 
+                                    src={getImageUrl(item.mockup2D)} 
+                                    alt={`${item.name} mockup`}
+                                    className="max-h-full max-w-full object-contain"
+                                    style={{ objectFit: 'scale-down' }}
+                                  />
+                                </div>
+                              ) : item.customDesign ? (
+                                <div className="relative w-full h-full flex items-center justify-center bg-gray-100 rounded-lg">
+                                  <img 
+                                    src={getImageUrl(item.customDesign)} 
+                                    alt={item.name}
+                                    className="max-w-full max-h-full object-contain"
+                                  />
+                                  <div className="absolute inset-0 border border-gray-200 rounded-lg"></div>
+                                </div>
+                              ) : (
                                 <img 
                                   src={item.image} 
-                                  alt={item.name} 
-                                  className="w-full h-full object-cover"
+                                  alt={item.name}
+                                  className="w-full h-full object-cover rounded-lg"
                                 />
                               )}
                             </div>

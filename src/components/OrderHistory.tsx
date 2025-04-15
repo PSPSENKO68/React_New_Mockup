@@ -56,10 +56,31 @@ export default function OrderHistory({ userId }: OrderHistoryProps) {
   
   async function cancelOrder(orderId: string) {
     try {
-      // Only allow cancellation if the order is in pending status
+      // Find the order
       const order = orders.find(o => o.id === orderId);
-      if (!order || order.status !== 'pending') {
+      if (!order) {
+        setError('Order not found');
+        return;
+      }
+      
+      // Only allow cancellation if the order is in pending status
+      if (order.status !== 'pending') {
         setError('Only pending orders can be cancelled');
+        return;
+      }
+      
+      // Check if the order has a GHN shipping order
+      const { data, error: queryError } = await supabase
+        .from('orders')
+        .select('has_ghn_order, ghn_code')
+        .eq('id', orderId)
+        .single();
+      
+      if (queryError) throw queryError;
+      
+      // Prevent cancellation if GHN order exists
+      if (data.has_ghn_order) {
+        setError('This order cannot be cancelled because shipping has been arranged');
         return;
       }
       
@@ -70,11 +91,6 @@ export default function OrderHistory({ userId }: OrderHistoryProps) {
         .eq('id', orderId);
       
       if (error) throw error;
-      
-      // Cancel GHN order if it exists
-      if (order.ghn_order_code) {
-        await GHNService.cancelOrder(order.ghn_order_code);
-      }
       
       // Refresh orders
       if (userId) {

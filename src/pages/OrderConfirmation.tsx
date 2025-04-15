@@ -33,10 +33,69 @@ export function OrderConfirmation() {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchOrderDetails();
   }, [orderId]);
+
+  // Load public URLs for stored images when order items change
+  useEffect(() => {
+    loadImageUrls();
+  }, [orderItems]);
+
+  async function loadImageUrls() {
+    if (orderItems.length === 0) return;
+    
+    const urlMap: Record<string, string> = {};
+    
+    for (const item of orderItems) {
+      // Process mockup_design_url paths
+      if (item.mockup_design_url) {
+        try {
+          const { data } = supabase.storage
+            .from('case-assets')
+            .getPublicUrl(item.mockup_design_url);
+          
+          if (data.publicUrl) {
+            urlMap[item.mockup_design_url] = data.publicUrl;
+          }
+        } catch (error) {
+          console.error('Error getting public URL for mockup design:', error);
+        }
+      }
+      
+      // Process custom_design_url paths
+      if (item.custom_design_url) {
+        try {
+          const { data } = supabase.storage
+            .from('case-assets')
+            .getPublicUrl(item.custom_design_url);
+          
+          if (data.publicUrl) {
+            urlMap[item.custom_design_url] = data.publicUrl;
+          }
+        } catch (error) {
+          console.error('Error getting public URL for custom design:', error);
+        }
+      }
+    }
+    
+    setImageUrls(urlMap);
+  }
+
+  // Helper function to get the correct image URL
+  const getImageUrl = (path: string | undefined): string | undefined => {
+    if (!path) return undefined;
+    if (path.startsWith('http')) return path;
+    if (path.startsWith('data:')) return path;
+    
+    // Use the url from imageUrls if available
+    if (imageUrls[path]) return imageUrls[path];
+    
+    // Return a placeholder if image not found
+    return undefined;
+  };
 
   async function fetchOrderDetails() {
     try {
@@ -213,17 +272,27 @@ export function OrderConfirmation() {
                       <tr key={item.id}>
                         <td className="px-6 py-4">
                           <div className="flex items-center">
-                            {item.mockup_design_url && (
-                              <div className="flex-shrink-0 h-12 w-12 mr-4">
+                            <div className="flex-shrink-0 h-16 w-16 mr-4">
+                              {item.mockup_design_url ? (
                                 <img 
-                                  src={item.mockup_design_url} 
-                                  alt="Product" 
-                                  className="h-12 w-12 object-cover rounded"
+                                  src={getImageUrl(item.mockup_design_url)} 
+                                  alt="Product mockup" 
+                                  className="h-16 w-16 object-contain rounded"
                                 />
-                              </div>
-                            )}
+                              ) : item.custom_design_url ? (
+                                <img 
+                                  src={getImageUrl(item.custom_design_url)} 
+                                  alt="Custom design" 
+                                  className="h-16 w-16 object-contain rounded"
+                                />
+                              ) : (
+                                <div className="h-16 w-16 bg-gray-200 rounded flex items-center justify-center text-gray-500">
+                                  No image
+                                </div>
+                              )}
+                            </div>
                             <div>
-                              {item.custom_design_url ? 'Thiết kế tùy chỉnh' : (item.product_name || 'Sản phẩm')}
+                              {item.product_name || (item.custom_design_url ? 'Thiết kế tùy chỉnh' : 'Sản phẩm')}
                             </div>
                           </div>
                         </td>

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import JSZip from 'jszip';
+import { OrderDetail } from '../components/OrderDetail';
 
 
 function Dashboard() {
@@ -1328,6 +1329,8 @@ function Orders() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [downloadLoading, setDownloadLoading] = useState(false);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [dateFilter, setDateFilter] = useState<string>('');
 
   useEffect(() => {
     fetchOrders();
@@ -1369,12 +1372,73 @@ function Orders() {
 
   async function downloadFile(filePath: string): Promise<Blob | null> {
     try {
+      if (!filePath) {
+        console.error('Empty file path provided');
+        return null;
+      }
+
+      // More robust handling of different path formats
+      let storagePath = filePath;
+      
+      // If it's a full URL
+      if (filePath.startsWith('http')) {
+        try {
+          const url = new URL(filePath);
+          const pathParts = url.pathname.split('/');
+          // Find 'case-assets' in the path and get everything after it
+          const caseAssetsIndex = pathParts.findIndex(part => part === 'case-assets' || part === 'object' || part === 'storage');
+          if (caseAssetsIndex >= 0 && pathParts.length > caseAssetsIndex + 1) {
+            storagePath = pathParts.slice(caseAssetsIndex + 1).join('/');
+          }
+        } catch (err) {
+          console.error('Error parsing URL:', err);
+        }
+      } 
+      // If it's a path that starts with case-assets/ or storage/, remove the prefix
+      else if (filePath.includes('case-assets/')) {
+        storagePath = filePath.split('case-assets/')[1];
+      } else if (filePath.includes('storage/')) {
+        storagePath = filePath.split('storage/')[1];
+      }
+      
+      if (!storagePath) {
+        console.error('Invalid storage path format:', filePath);
+        return null;
+      }
+
+      // Clean up the path - remove any duplicate slashes, URL encoded characters, etc.
+      storagePath = decodeURIComponent(storagePath).replace(/\/+/g, '/').trim();
+      
+      console.log('Attempting to download file with path:', storagePath);
+
+      // Get file from Supabase storage with error handling
       const { data, error } = await supabase.storage
         .from('case-assets')
-        .download(filePath);
+        .download(storagePath);
       
       if (error || !data) {
         console.error('Error downloading file:', error);
+        
+        // Try alternate download method if the first one fails
+        try {
+          const { data: publicUrlData } = await supabase.storage
+            .from('case-assets')
+            .getPublicUrl(storagePath);
+            
+          if (publicUrlData?.publicUrl) {
+            console.log('Trying alternate download via public URL');
+            const response = await fetch(publicUrlData.publicUrl);
+            if (response.ok) {
+              const blobData = await response.blob();
+              return blobData;
+            } else {
+              console.error('Public URL fetch failed with status:', response.status);
+            }
+          }
+        } catch (fetchErr) {
+          console.error('Error with alternate download method:', fetchErr);
+        }
+        
         return null;
       }
       
@@ -1385,20 +1449,36 @@ function Orders() {
     }
   }
 
-  async function downloadZipFile() {
+  const toggleOrderSelection = (orderId: string): void => {
+    setSelectedOrderIds(prev => {
+      if (prev.includes(orderId)) {
+        return prev.filter(id => id !== orderId);
+      } else {
+        return [...prev, orderId];
+      }
+    });
+  };
+
+  const toggleSelectAll = (): void => {
+    if (selectedOrderIds.length === filteredOrders.length) {
+      setSelectedOrderIds([]);
+    } else {
+      setSelectedOrderIds(filteredOrders.map(order => order.id));
+    }
+  };
+
+  const downloadOrderItemDesigns = async (order: any, item: any): Promise<void> => {
     try {
-      setDownloadLoading(true);
+      if (!item.custom_design_url && !item.mockup_design_url) {
+        alert('No designs available for this item');
+        return;
+      }
       
       // Create new JSZip instance
       const zip = new JSZip();
+      const promises: Promise<void>[] = [];
+      let filesAdded = false;
       
-      // Process all orders to find design files
-      const promises = [];
-      
-      for (const order of orders) {
-        if (!order.order_items) continue;
-        
-        for (const item of order.order_items) {
           // Download mockup design if available
           if (item.mockup_design_url) {
             const mockupPromise = downloadFile(item.mockup_design_url)
@@ -1406,6 +1486,7 @@ function Orders() {
                 if (fileData) {
                   const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_mockup.png`;
                   zip.file(fileName, fileData);
+              filesAdded = true;
                 }
               })
               .catch((err: any) => console.error('Error downloading mockup file:', err));
@@ -1420,6 +1501,97 @@ function Orders() {
                 if (fileData) {
                   const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_custom.png`;
                   zip.file(fileName, fileData);
+              filesAdded = true;
+                }
+              })
+              .catch((err: any) => console.error('Error downloading custom file:', err));
+            
+            promises.push(customPromise);
+          }
+      
+      // Wait for all downloads to complete
+      await Promise.all(promises);
+      
+      // Check if any files were added
+      if (!filesAdded) {
+        alert('Unable to download any designs. The files may be missing or inaccessible.');
+        return;
+      }
+      
+      // Generate the zip file
+      const content = await zip.generateAsync({ type: 'blob' });
+      
+      // Create download link
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      const productName = item.inventory_items?.phone_models?.name 
+        ? `${item.inventory_items.phone_models.name}_${item.inventory_items.case_types?.name || 'Case'}`
+        : 'product';
+      link.download = `design_${productName}_${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      console.error('Error downloading item designs:', err);
+      setError('Failed to download design. Please try again.');
+    }
+  };
+
+  const downloadSelectedOrderDesigns = async (): Promise<void> => {
+    try {
+      if (selectedOrderIds.length === 0) {
+        alert('Please select at least one order to download designs');
+        return;
+      }
+
+      setDownloadLoading(true);
+      
+      // Create new JSZip instance
+      const zip = new JSZip();
+      const promises: Promise<void>[] = [];
+      const selectedOrders = orders.filter(order => selectedOrderIds.includes(order.id));
+      let filesAdded = false;
+      
+      // Process each selected order
+      for (const order of selectedOrders) {
+        // Process each item in the order
+        for (const item of order.order_items) {
+          // Skip items without designs
+          if (!item.custom_design_url && !item.mockup_design_url) continue;
+          
+          // Create folder for each order
+          const orderFolder = zip.folder(`Order_${order.id.substring(0, 8)}`);
+          if (!orderFolder) continue;
+          
+          // Download mockup design if available
+          if (item.mockup_design_url) {
+            const mockupPromise = downloadFile(item.mockup_design_url)
+              .then((fileData: Blob | null) => {
+                if (fileData && orderFolder) {
+                  const productName = item.inventory_items?.phone_models?.name 
+                    ? `${item.inventory_items.phone_models.name}_${item.inventory_items.case_types?.name || 'Case'}`
+                    : `product_${item.id.substring(0, 8)}`;
+                  const fileName = `${productName}_mockup.png`;
+                  orderFolder.file(fileName, fileData);
+                  filesAdded = true;
+                }
+              })
+              .catch((err: any) => console.error('Error downloading mockup file:', err));
+            
+            promises.push(mockupPromise);
+          }
+          
+          // Download custom design if available
+          if (item.custom_design_url) {
+            const customPromise = downloadFile(item.custom_design_url)
+              .then((fileData: Blob | null) => {
+                if (fileData && orderFolder) {
+                  const productName = item.inventory_items?.phone_models?.name 
+                    ? `${item.inventory_items.phone_models.name}_${item.inventory_items.case_types?.name || 'Case'}`
+                    : `product_${item.id.substring(0, 8)}`;
+                  const fileName = `${productName}_custom.png`;
+                  orderFolder.file(fileName, fileData);
+                  filesAdded = true;
                 }
               })
               .catch((err: any) => console.error('Error downloading custom file:', err));
@@ -1432,32 +1604,175 @@ function Orders() {
       // Wait for all downloads to complete
       await Promise.all(promises);
       
+      // Check if any files were added
+      if (!filesAdded) {
+        alert('Unable to download any designs. The files may be missing or inaccessible.');
+        setDownloadLoading(false);
+        return;
+      }
+      
       // Generate the zip file
       const content = await zip.generateAsync({ type: 'blob' });
       
       // Create download link
       const link = document.createElement('a');
       link.href = URL.createObjectURL(content);
-      link.download = `order_designs_${new Date().toISOString().split('T')[0]}.zip`;
+      link.download = `selected_orders_designs_${new Date().toISOString().split('T')[0]}.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     } catch (err: any) {
-      console.error('Error creating zip file:', err);
+      console.error('Error downloading selected designs:', err);
       setError('Failed to download designs. Please try again.');
     } finally {
       setDownloadLoading(false);
     }
-  }
+  };
+
+  const downloadAllDesignsByDate = async () => {
+    try {
+      setDownloadLoading(true);
+      setError(null);
+
+      // Filter orders by date if dateFilter is provided
+      let filteredOrdersByDate = orders;
+      if (dateFilter) {
+        try {
+          const filterDate = new Date(dateFilter);
+          
+          // Check if date is valid
+          if (isNaN(filterDate.getTime())) {
+            throw new Error('Invalid date format');
+          }
+          
+          filteredOrdersByDate = orders.filter(order => {
+            try {
+              const orderDate = new Date(order.created_at);
+              return orderDate.toDateString() === filterDate.toDateString();
+            } catch (dateErr) {
+              console.error('Error parsing order date:', dateErr);
+              return false;
+            }
+          });
+
+          if (filteredOrdersByDate.length === 0) {
+            alert('No orders found for the selected date');
+            setDownloadLoading(false);
+            return;
+          }
+        } catch (dateErr) {
+          console.error('Error with date filter:', dateErr);
+          alert('Invalid date format. Please select a valid date.');
+          setDownloadLoading(false);
+          return;
+        }
+      }
+
+      const zip = new JSZip();
+      const promises: Promise<void>[] = [];
+      let filesAdded = false;
+
+      // Group designs by order
+      for (const order of filteredOrdersByDate) {
+        // Safety check for order properties
+        if (!order || !order.id) {
+          console.error('Invalid order object:', order);
+          continue;
+        }
+        
+        // Create a safe folder name by removing characters that are invalid in filenames
+        const safeName = (order.full_name || 'Unknown')
+          .replace(/[\\/:*?"<>|]/g, '_')  // Replace invalid filename chars
+          .substring(0, 50);              // Limit length
+        
+        const orderFolder = zip.folder(`Order_${order.id.substring(0, 8)}_${safeName}`);
+        if (!orderFolder) {
+          console.error('Failed to create folder for order:', order.id);
+          continue;
+        }
+
+        for (const item of order.order_items) {
+          if (item.custom_design_url) {
+            const promise = downloadFile(item.custom_design_url)
+              .then((fileData: Blob | null) => {
+                if (fileData && orderFolder) {
+                  const fileName = `item_${item.id.substring(0, 8)}_custom.png`;
+                  orderFolder.file(fileName, fileData);
+                  filesAdded = true;
+                }
+              })
+              .catch((err: any) => console.error('Download error:', err));
+            promises.push(promise);
+          }
+
+          if (item.mockup_design_url) {
+            const promise = downloadFile(item.mockup_design_url)
+              .then((fileData: Blob | null) => {
+                if (fileData && orderFolder) {
+                  const fileName = `item_${item.id.substring(0, 8)}_mockup.png`;
+                  orderFolder.file(fileName, fileData);
+                  filesAdded = true;
+                }
+              })
+              .catch((err: any) => console.error('Download error:', err));
+            promises.push(promise);
+          }
+        }
+      }
+
+      await Promise.all(promises);
+      
+      // Check if any files were added
+      if (!filesAdded) {
+        alert('Unable to download any designs. The files may be missing or inaccessible.');
+        setDownloadLoading(false);
+        return;
+      }
+      
+      const content = await zip.generateAsync({ type: 'blob' });
+
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      const dateString = dateFilter ? new Date(dateFilter).toISOString().split('T')[0] : 'all';
+      link.download = `designs_${dateString}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err: any) {
+      console.error(err);
+      setError('Failed to download designs');
+    } finally {
+      setDownloadLoading(false);
+    }
+  };
+
+  // Filter orders based on search query
+  const filteredOrders = orders.filter(order => {
+    const searchLower = searchQuery.toLowerCase();
+    return (
+      order.id.toLowerCase().includes(searchLower) ||
+      order.full_name.toLowerCase().includes(searchLower) ||
+      order.email.toLowerCase().includes(searchLower) ||
+      order.status.toLowerCase().includes(searchLower)
+    );
+  });
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-4">
         <h2 className="text-2xl font-bold">Orders</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="px-3 py-2 border rounded-lg"
+            />
         <button
-          onClick={downloadZipFile}
-          disabled={downloadLoading}
-          className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition"
+              onClick={downloadAllDesignsByDate}
+              disabled={downloadLoading || !dateFilter}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400"
         >
           {downloadLoading ? (
             <>
@@ -1467,10 +1782,30 @@ function Orders() {
           ) : (
             <>
               <Download className="w-4 h-4" />
-              <span>Download Designs</span>
+                  <span>Download by Date</span>
             </>
           )}
         </button>
+          </div>
+          
+          <button
+            onClick={downloadSelectedOrderDesigns}
+            disabled={downloadLoading || selectedOrderIds.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:bg-gray-400"
+          >
+            {downloadLoading ? (
+              <>
+                <Loader className="w-4 h-4 animate-spin" />
+                <span>Downloading...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                <span>Download Selected ({selectedOrderIds.length})</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -1501,23 +1836,34 @@ function Orders() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b">
+                    <th className="text-left py-3 pl-3">
+                      <input 
+                        type="checkbox"
+                        checked={selectedOrderIds.length === filteredOrders.length && filteredOrders.length > 0}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4"
+                      />
+                    </th>
                     <th className="text-left py-3">Order ID</th>
                     <th className="text-left py-3">Customer</th>
                     <th className="text-left py-3">Items</th>
                     <th className="text-left py-3">Status</th>
                     <th className="text-left py-3">Total</th>
                     <th className="text-left py-3">Date</th>
+                    <th className="text-right py-3">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {orders
-                    .filter(order => 
-                      order.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      order.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      order.id.toString().includes(searchQuery)
-                    )
-                    .map(order => (
+                  {filteredOrders.map(order => (
                     <tr key={order.id} className="border-b">
+                      <td className="py-3 pl-3">
+                        <input 
+                          type="checkbox"
+                          checked={selectedOrderIds.includes(order.id)}
+                          onChange={() => toggleOrderSelection(order.id)}
+                          className="w-4 h-4"
+                        />
+                      </td>
                       <td className="py-3">#{order.id.substring(0, 8)}</td>
                       <td className="py-3">
                         <div>
@@ -1527,15 +1873,27 @@ function Orders() {
                       </td>
                       <td className="py-3">
                         {order.order_items?.map((item: any) => (
-                          <div key={item.id} className="text-sm">
+                          <div key={item.id} className="text-sm flex items-center gap-2 mb-1">
+                            <span>
                             {item.inventory_items?.phone_models?.name} - {item.inventory_items?.case_types?.name}
                             <span className="text-gray-500"> (x{item.quantity})</span>
+                            </span>
+                            {(item.custom_design_url || item.mockup_design_url) && (
+                              <button
+                                onClick={() => downloadOrderItemDesigns(order, item)}
+                                className="text-blue-600 hover:text-blue-800"
+                                title="Download design"
+                              >
+                                <Download className="w-3 h-3" />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </td>
                       <td className="py-3">
                         <span className={`px-2 py-1 rounded-full text-xs ${
                           order.status === 'completed' ? 'bg-green-100 text-green-800' :
+                          order.status === 'processing' ? 'bg-blue-100 text-blue-800' :
                           order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-red-100 text-red-800'
                         }`}>
@@ -1545,6 +1903,14 @@ function Orders() {
                       <td className="py-3">${order.total.toFixed(2)}</td>
                       <td className="py-3">
                         {new Date(order.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="py-3 text-right">
+                        <Link
+                          to={`/admin/orders/${order.id}`}
+                          className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+                        >
+                          View
+                        </Link>
                       </td>
                     </tr>
                   ))}
@@ -2098,6 +2464,7 @@ export function Admin() {
             <Routes>
               <Route path="" element={<Dashboard />} />
               <Route path="orders" element={<Orders />} />
+              <Route path="orders/:orderId" element={<OrderDetail />} />
               <Route path="inventory" element={<Inventory />} />
               <Route path="phone-models" element={<PhoneModels />} />
               <Route path="case-types" element={<CaseTypes />} />
