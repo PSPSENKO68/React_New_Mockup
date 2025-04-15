@@ -1,40 +1,70 @@
 import { useEffect, useState } from 'react';
 
-export function DebugInfo() {
-  const [errorInfo, setErrorInfo] = useState<string[]>([]);
+export default function DebugInfo() {
+  const [logs, setLogs] = useState<string[]>([]);
   
   useEffect(() => {
-    // Store original console.error
-    const originalError = console.error;
+    // Store original console methods
+    const originalConsoleError = console.error;
     
-    // Override console.error to capture errors
-    console.error = (...args) => {
-      originalError(...args);
-      setErrorInfo(prev => [...prev, args.join(' ')]);
+    // Override console.error
+    console.error = function(...args) {
+      // Call the original method
+      originalConsoleError.apply(console, args);
+      
+      // Format and store the log
+      const timestamp = new Date().toISOString();
+      const formattedArgs = args.map(arg => {
+        if (arg instanceof Error) {
+          return `${arg.name}: ${arg.message}\n${arg.stack || ''}`;
+        } else if (typeof arg === 'object') {
+          try {
+            if (arg && arg.message) {
+              // Handle GHN API error specifically
+              if (arg.message.includes('GHN API Error')) {
+                return `GHN API Error: ${JSON.stringify(arg, null, 2)}`;
+              }
+            }
+            return JSON.stringify(arg, null, 2);
+          } catch (e) {
+            return String(arg);
+          }
+        } else {
+          return String(arg);
+        }
+      });
+      
+      const logMessage = `${timestamp} \n ${formattedArgs.join(' ')}`;
+      setLogs(prevLogs => [...prevLogs, logMessage].slice(-10)); // Keep only the last 10 logs
     };
     
-    // Restore original on cleanup
+    // Cleanup function to restore original methods
     return () => {
-      console.error = originalError;
+      console.error = originalConsoleError;
     };
   }, []);
   
-  if (errorInfo.length === 0) return null;
+  // Only show in development
+  if (import.meta.env.MODE !== 'development') {
+    return null;
+  }
   
   return (
-    <div className="fixed bottom-4 right-4 z-50 bg-red-50 border border-red-200 rounded-lg p-4 max-w-md max-h-80 overflow-auto">
-      <h3 className="text-red-600 font-semibold mb-2">Debug Information</h3>
-      <ul className="text-xs space-y-1">
-        {errorInfo.map((error, index) => (
-          <li key={index} className="text-red-500">{error}</li>
-        ))}
-      </ul>
-      <button 
-        className="mt-2 text-xs bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700"
-        onClick={() => setErrorInfo([])}
-      >
-        Clear
-      </button>
+    <div className="debug-info">
+      <details>
+        <summary className="text-xs text-red-500 cursor-pointer">Debug Info (Click to expand)</summary>
+        <div className="text-xs whitespace-pre-wrap bg-gray-100 p-2 max-h-96 overflow-auto">
+          {logs.length === 0 ? (
+            <p>No errors logged.</p>
+          ) : (
+            logs.map((log, index) => (
+              <div key={index} className="mb-2 pb-2 border-b border-gray-300">
+                {log}
+              </div>
+            ))
+          )}
+        </div>
+      </details>
     </div>
   );
 } 

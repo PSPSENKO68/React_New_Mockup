@@ -12,11 +12,31 @@ import {
   Users,
   Upload,
   Download,
-  Loader
+  Loader,
+  Eye
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import JSZip from 'jszip';
 import { OrderDetail } from '../components/OrderDetail';
+import {
+  Accordion,
+  AccordionItem,
+  AccordionButton,
+  AccordionPanel,
+  AccordionIcon,
+  Button,
+  Table,
+  Thead,
+  Tr,
+  Th,
+  Tbody,
+  Td,
+  HStack,
+  Box,
+  TableContainer
+} from '@chakra-ui/react';
+import { FaPrint } from 'react-icons/fa';
+import { Icon } from '@chakra-ui/react';
 
 
 function Dashboard() {
@@ -1328,14 +1348,41 @@ function Orders() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
-  const [dateFilter, setDateFilter] = useState<string>('');
 
   useEffect(() => {
     fetchOrders();
   }, []);
 
+  // Toggle order selection for bulk actions
+  const toggleOrderSelection = (orderId: string): void => {
+    if (selectedOrderIds.includes(orderId)) {
+      setSelectedOrderIds(selectedOrderIds.filter(id => id !== orderId));
+    } else {
+      setSelectedOrderIds([...selectedOrderIds, orderId]);
+    }
+  };
+
+  // Toggle select all orders
+  const toggleSelectAll = (): void => {
+    if (selectedOrderIds.length === filteredOrders.length) {
+      setSelectedOrderIds([]);
+    } else {
+      setSelectedOrderIds(filteredOrders.map(order => order.id));
+    }
+  };
+
+  // Function to print GHN shipping label
+  const printGHNLabel = (orderCode: string): void => {
+    // Import GHNService dynamically to avoid any circular dependencies
+    import('../lib/ghnService').then(({ default: GHNService }) => {
+      // Call the printGHNLabel method directly instead of opening a URL
+      GHNService.printGHNLabel(orderCode);
+    });
+  };
+  
   async function fetchOrders() {
     try {
       setLoading(true);
@@ -1387,24 +1434,6 @@ function Orders() {
       return null;
     }
   }
-
-  const toggleOrderSelection = (orderId: string): void => {
-    setSelectedOrderIds(prev => {
-      if (prev.includes(orderId)) {
-        return prev.filter(id => id !== orderId);
-      } else {
-        return [...prev, orderId];
-      }
-    });
-  };
-
-  const toggleSelectAll = (): void => {
-    if (selectedOrderIds.length === filteredOrders.length) {
-      setSelectedOrderIds([]);
-    } else {
-      setSelectedOrderIds(filteredOrders.map(order => order.id));
-    }
-  };
 
   const downloadOrderItemDesigns = async (order: any, item: any): Promise<void> => {
     try {
@@ -1732,62 +1761,57 @@ function Orders() {
                 </thead>
                 <tbody>
                   {filteredOrders.map(order => (
-                    <tr key={order.id} className="border-b">
-                      <td className="py-3 pl-3">
+                    <tr key={order.id} className="border-b hover:bg-gray-50">
+                      <td className="py-3 pl-4">
                         <input 
                           type="checkbox"
                           checked={selectedOrderIds.includes(order.id)}
-                          onChange={() => toggleOrderSelection(order.id)}
-                          className="w-4 h-4"
+                          onChange={() => toggleOrderSelection(order.id)} 
+                          className="h-4 w-4"
                         />
                       </td>
-                      <td className="py-3">#{order.id.substring(0, 8)}</td>
                       <td className="py-3">
-                        <div>
-                          <div className="font-medium">{order.full_name}</div>
-                          <div className="text-sm text-gray-500">{order.email}</div>
-                        </div>
+                        <span>{order.id.substring(0, 8)}</span>
                       </td>
-                      <td className="py-3">
-                        {order.order_items?.map((item: any) => (
-                          <div key={item.id} className="text-sm flex items-center gap-2 mb-1">
-                            <span>
-                              {item.inventory_items?.phone_models?.name} - {item.inventory_items?.case_types?.name}
-                              <span className="text-gray-500"> (x{item.quantity})</span>
-                            </span>
-                            {(item.custom_design_url || item.mockup_design_url) && (
-                              <button
-                                onClick={() => downloadOrderItemDesigns(order, item)}
-                                className="text-blue-600 hover:text-blue-800"
-                                title="Download design"
-                              >
-                                <Download className="w-3 h-3" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </td>
+                      <td className="py-3">{order.full_name}</td>
+                      <td className="py-3">{order.email}</td>
+                      <td className="py-3">{new Date(order.created_at).toLocaleString()}</td>
                       <td className="py-3">
                         <span className={`px-2 py-1 rounded-full text-xs ${
                           order.status === 'completed' ? 'bg-green-100 text-green-800' :
                           order.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                          order.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-red-100 text-red-800'
+                          order.status === 'cancelled' ? 'bg-red-100 text-red-800' : 
+                          'bg-yellow-100 text-yellow-800'
                         }`}>
                           {order.status}
                         </span>
                       </td>
                       <td className="py-3">${order.total.toFixed(2)}</td>
+                      <td className="py-3">{order.order_items?.length || 0}</td>
                       <td className="py-3">
-                        {new Date(order.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="py-3 text-right">
-                        <Link
-                          to={`/admin/orders/${order.id}`}
-                          className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
-                        >
-                          View
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link 
+                            to={`/admin/orders/${order.id}`}
+                            className="p-1 hover:bg-gray-100 rounded text-blue-600"
+                            title="View order details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Link>
+                          
+                          {order.has_ghn_order && order.ghn_code && (
+                            <button
+                              onClick={() => printGHNLabel(order.ghn_code)}
+                              className="p-1 hover:bg-gray-100 rounded text-green-600"
+                              title="Print shipping label"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                                <rect x="6" y="14" width="12" height="8"></rect>
+                              </svg>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

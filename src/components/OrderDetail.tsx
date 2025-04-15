@@ -402,41 +402,78 @@ export function OrderDetail() {
         }))
       };
       
-      // Create shipping order in GHN
-      const ghnResponse = await GHNService.createOrder(shippingData);
-      
-      if (!ghnResponse || !ghnResponse.order_code) {
-        throw new Error('Failed to create GHN order. No order code returned.');
-      }
-      
-      // Update order in database
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({
+      try {
+        // Create shipping order in GHN
+        const ghnResponse = await GHNService.createOrder(shippingData);
+        
+        if (!ghnResponse || !ghnResponse.order_code) {
+          throw new Error('Failed to create GHN order. No order code returned.');
+        }
+        
+        // Update order in database
+        const { error: updateError } = await supabase
+          .from('orders')
+          .update({
+            has_ghn_order: true,
+            ghn_code: ghnResponse.order_code,
+            status: 'processing' // Update order status to processing
+          })
+          .eq('id', order.id);
+        
+        if (updateError) {
+          throw updateError;
+        }
+        
+        // Update local state
+        setOrder({
+          ...order,
           has_ghn_order: true,
           ghn_code: ghnResponse.order_code,
-          status: 'processing' // Update order status to processing
-        })
-        .eq('id', order.id);
-      
-      if (updateError) {
-        throw updateError;
+          status: 'processing'
+        });
+        
+        setSuccessMessage('GHN shipping order created successfully');
+        setError(null);
+        
+        // Reload order details to get updated data
+        fetchOrderDetails();
+      } catch (error: any) {
+        console.error('Error creating GHN order:', error);
+        
+        // Check if the order might have been created despite the error
+        // Check the database for a GHN code for this order
+        const { data, error: checkError } = await supabase
+          .from('orders')
+          .select('ghn_code')
+          .eq('id', order.id)
+          .single();
+        
+        if (!checkError && data && data.ghn_code) {
+          // We found the GHN code in the order record
+          const ghnCode = data.ghn_code;
+          
+          // No need to update order in database, it was already updated by GHNService
+          
+          // Update local state
+          setOrder({
+            ...order,
+            has_ghn_order: true,
+            ghn_code: ghnCode,
+            status: 'processing'
+          });
+          
+          setSuccessMessage('GHN shipping order was created, but there was an error in the response. The order has been recorded successfully.');
+          setError(null);
+          
+          // Reload order details
+          fetchOrderDetails();
+        } else {
+          // The order was not created, show the error
+          setError(error.message || 'Failed to create GHN shipping order');
+        }
       }
-      
-      // Update local state
-      setOrder({
-        ...order,
-        has_ghn_order: true,
-        ghn_code: ghnResponse.order_code,
-        status: 'processing'
-      });
-      
-      setSuccessMessage('GHN shipping order created successfully');
-      
-      // Reload order details to get updated data
-      fetchOrderDetails();
     } catch (error: any) {
-      console.error('Error creating GHN order:', error);
+      console.error('Error in GHN order creation process:', error);
       setError(error.message || 'Failed to create GHN shipping order');
     } finally {
       setCreatingGHN(false);
@@ -793,7 +830,26 @@ export function OrderDetail() {
                   GHN shipping order created
                 </div>
                 {order.ghn_code && (
-                  <p className="mt-1 text-sm">Order Code: {order.ghn_code}</p>
+                  <div>
+                    <p className="mt-1 text-sm">Order Code: {order.ghn_code}</p>
+                    <div className="mt-3">
+                      <button
+                        onClick={() => {
+                          if (order.ghn_code) {
+                            GHNService.printGHNLabel(order.ghn_code);
+                          }
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                          <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                          <rect x="6" y="14" width="12" height="8"></rect>
+                        </svg>
+                        In Vận Đơn
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}

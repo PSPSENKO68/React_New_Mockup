@@ -10,7 +10,7 @@ import { AdminLogin } from './pages/AdminLogin';
 import { AuthProvider } from './contexts/AuthContext';
 import { CartProvider } from './contexts/CartContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { DebugInfo } from './components/DebugInfo';
+import DebugInfo from './components/DebugInfo';
 import { Diagnostic } from './pages/Diagnostic';
 import { OrderConfirmation } from './pages/OrderConfirmation';
 

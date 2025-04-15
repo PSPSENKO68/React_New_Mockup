@@ -262,25 +262,61 @@ export const GHNService = {
       const result = await ghn.order.createOrder(params as any) as GHNGenericResponse;
       console.log('GHN createOrder response:', JSON.stringify(result, null, 2));
       
-      if (result && result.code === 200 && result.data) {
-        const orderData = result.data as GHNOrderResponse;
-        // Lưu thông tin vận chuyển vào database
-        await supabase
-          .from('shipping')
-          .insert({
-            orderId: params.orderId,
-            provider: 'GHN',
-            orderCode: orderData.order_code,
-            expectedDeliveryTime: orderData.expected_delivery_time,
-            status: 'ready_to_pick',
-            fee: params.cod_amount || 0,
-            trackingUrl: GHNService.getTrackingUrl(orderData.order_code)
-          });
+      // Check if we have a valid response - even if code isn't 200, the order might have been created
+      if (result) {
+        // If we have an order_code in the data, the order was created successfully
+        if (result.data && result.data.order_code) {
+          const orderData = result.data as GHNOrderResponse;
+          
+          // Instead of inserting into shipping table, update the orders table directly
+          try {
+            await supabase
+              .from('orders')
+              .update({
+                has_ghn_order: true,
+                ghn_code: orderData.order_code,
+                shipping_status: 'ready_to_pick',
+                expected_delivery_time: orderData.expected_delivery_time,
+                shipping_fee: params.cod_amount || 0,
+                tracking_url: GHNService.getTrackingUrl(orderData.order_code)
+              })
+              .eq('id', params.orderId);
+          } catch (error) {
+            console.error('Error updating orders table with shipping information:', error);
+            // Continue anyway since the order was created
+          }
+          
+          return orderData;
+        }
         
-        return orderData;
+        // If we have an order_code directly in the result (not in data)
+        if (result.order_code) {
+          const orderData = result as unknown as GHNOrderResponse;
+          
+          // Instead of inserting into shipping table, update the orders table directly
+          try {
+            await supabase
+              .from('orders')
+              .update({
+                has_ghn_order: true,
+                ghn_code: orderData.order_code,
+                shipping_status: 'ready_to_pick',
+                expected_delivery_time: orderData.expected_delivery_time || new Date().toISOString(),
+                shipping_fee: params.cod_amount || 0,
+                tracking_url: GHNService.getTrackingUrl(orderData.order_code)
+              })
+              .eq('id', params.orderId);
+          } catch (error) {
+            console.error('Error updating orders table with shipping information:', error);
+            // Continue anyway since the order was created
+          }
+          
+          return orderData;
+        }
       }
       
-      throw new Error(`GHN API Error: ${result.code} - ${result.message || 'Unknown error'}`);
+      // If we reach here, we couldn't find an order_code
+      throw new Error(`GHN API Error: ${result?.code || 'Unknown'} - ${result?.message || 'Unknown error'}`);
     } catch (error: any) {
       // Detailed error logging
       const errorMessage = error.message || 'Unknown error';
@@ -292,7 +328,7 @@ export const GHNService = {
         response: errorResponse
       });
       
-      throw new Error(`Không thể tạo đơn hàng: ${errorMessage}`);
+      throw new Error(`Không thể tạo đơn hàng: GHN API Error: ${errorMessage}`);
     }
   },
   
@@ -358,6 +394,62 @@ export const GHNService = {
   },
 
   /**
+   * Lấy URL in vận đơn GHN
+   */
+  getPrintUrl(orderCode: string) {
+    // No longer returns a URL - this method name is kept for compatibility
+    // This will programmatically fetch and print the label
+    GHNService.printGHNLabel(orderCode);
+    return ''; // Return empty string since we're handling printing directly
+  },
+
+  /**
+   * In vận đơn GHN bằng cách gọi API và xử lý response
+   */
+  async printGHNLabel(orderCode: string) {
+    try {
+      const config = getGHNConfig();
+      const apiUrl = `${config.host}/shiip/public-api/v2/a5/gen-token`;
+      
+      // Fetch the print token with proper authentication
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Token': config.token,
+          'ShopId': config.shopId.toString()
+        },
+        body: JSON.stringify({
+          order_codes: [orderCode]
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.code === 200 && result.data && result.data.token) {
+        // Use the token to open the print page
+        const printUrl = `${config.host}/a5/public-api/printA5?token=${result.data.token}`;
+        window.open(printUrl, '_blank');
+      } else {
+        // Fallback to order tracking page if printing fails
+        console.error('Failed to get print token:', result);
+        alert('Không thể in vận đơn. Lỗi: ' + (result.message || 'Không xác định'));
+        
+        // Open tracking page instead
+        const trackingUrl = GHNService.getTrackingUrl(orderCode);
+        window.open(trackingUrl, '_blank');
+      }
+    } catch (error) {
+      console.error('Error printing GHN label:', error);
+      alert('Không thể in vận đơn. Vui lòng thử lại sau.');
+      
+      // Open tracking page as fallback
+      const trackingUrl = GHNService.getTrackingUrl(orderCode);
+      window.open(trackingUrl, '_blank');
+    }
+  },
+
+  /**
    * Map trạng thái GHN sang trạng thái hệ thống
    */
   mapGHNStatus(ghnStatus: string): string {
@@ -389,35 +481,38 @@ export const GHNService = {
       console.log('Starting GHN order status synchronization');
       
       // Lấy danh sách đơn hàng có trạng thái không phải là "completed" hoặc "cancelled"
-      const { data: shippingData, error: shippingError } = await supabase
-        .from('shipping')
-        .select('orderCode, orderId')
-        .not('status', 'in', '(delivered,cancelled)')
-        .eq('provider', 'GHN');
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('id, ghn_code')
+        .not('status', 'in', '(completed,cancelled)')
+        .eq('has_ghn_order', true)
+        .not('ghn_code', 'is', null);
       
-      if (shippingError) throw shippingError;
+      if (ordersError) throw ordersError;
       
-      if (!shippingData || shippingData.length === 0) {
+      if (!ordersData || ordersData.length === 0) {
         console.log('No active GHN orders found to sync');
         return { success: true, message: 'No orders to sync' };
       }
       
-      console.log(`Found ${shippingData.length} active GHN orders to sync`);
+      console.log(`Found ${ordersData.length} active GHN orders to sync`);
       
       // Đồng bộ từng đơn hàng
       const results = [];
-      for (const item of shippingData) {
+      for (const order of ordersData) {
         try {
           // Lấy thông tin đơn hàng từ GHN
-          const orderInfo = await GHNService.getOrderInfo(item.orderCode);
+          const orderInfo = await GHNService.getOrderInfo(order.ghn_code);
           const ghnStatus = orderInfo.status;
           const mappedStatus = GHNService.mapGHNStatus(ghnStatus);
           
           // Cập nhật trạng thái trong database
           await supabase
-            .from('shipping')
-            .update({ status: mappedStatus })
-            .eq('orderCode', item.orderCode);
+            .from('orders')
+            .update({ 
+              shipping_status: mappedStatus 
+            })
+            .eq('id', order.id);
           
           // Nếu là đơn hàng đã hủy hoặc đã giao, cập nhật trạng thái đơn hàng chính
           if (mappedStatus === 'cancelled' || mappedStatus === 'delivered') {
@@ -427,97 +522,95 @@ export const GHNService = {
               .from('orders')
               .update({ 
                 status: orderStatus,
-                shipping_status: mappedStatus,
                 updated_at: new Date().toISOString()
               })
-              .eq('id', item.orderId);
+              .eq('id', order.id);
             
-            console.log(`Updated order ${item.orderId} status to ${orderStatus} based on GHN status: ${ghnStatus}`);
+            console.log(`Updated order ${order.id} status to ${orderStatus} based on GHN status: ${ghnStatus}`);
           }
           
           results.push({
-            orderCode: item.orderCode,
-            orderId: item.orderId,
+            orderId: order.id,
+            ghnCode: order.ghn_code,
             originalStatus: ghnStatus,
             mappedStatus: mappedStatus,
             success: true
           });
         } catch (error: any) {
-          console.error(`Error syncing order ${item.orderCode}:`, error);
+          console.error(`Error syncing order ${order.ghn_code}:`, error);
           results.push({
-            orderCode: item.orderCode,
-            orderId: item.orderId,
+            orderId: order.id,
+            ghnCode: order.ghn_code,
             error: error.message,
             success: false
           });
         }
       }
       
-      return { 
-        success: true, 
-        total: shippingData.length,
+      return {
+        success: true,
+        totalProcessed: ordersData.length,
         successCount: results.filter(r => r.success).length,
-        failedCount: results.filter(r => !r.success).length,
-        results 
+        failCount: results.filter(r => !r.success).length,
+        results: results
       };
     } catch (error: any) {
       console.error('Error syncing GHN order statuses:', error);
-      return { success: false, message: error.message };
+      return {
+        success: false,
+        message: error.message,
+        error: error
+      };
     }
   },
 
   /**
    * Đánh dấu đơn hàng đã bị hủy
-   * Sử dụng khi cần hủy đơn hàng thủ công trong hệ thống
    */
   async markOrderAsCancelled(orderId: string) {
     try {
-      // Lấy thông tin shipping
-      const { data: shippingData, error: shippingError } = await supabase
-        .from('shipping')
-        .select('orderCode')
-        .eq('orderId', orderId)
-        .eq('provider', 'GHN')
+      // Get GHN order code
+      const { data, error } = await supabase
+        .from('orders')
+        .select('ghn_code')
+        .eq('id', orderId)
         .single();
       
-      if (shippingError && shippingError.code !== 'PGRST116') {
-        // PGRST116 là lỗi không tìm thấy dữ liệu, không phải lỗi nghiêm trọng
-        throw shippingError;
+      if (error) throw error;
+      if (!data || !data.ghn_code) {
+        throw new Error('GHN order code not found for this order');
       }
       
-      // Nếu có đơn GHN, thử hủy trên GHN
-      if (shippingData?.orderCode) {
-        try {
-          await GHNService.cancelOrder(shippingData.orderCode);
-          console.log(`Successfully cancelled GHN order: ${shippingData.orderCode}`);
-        } catch (cancelError: any) {
-          // Ghi log lỗi nhưng vẫn tiếp tục cập nhật database
-          console.error(`Error cancelling GHN order ${shippingData.orderCode}:`, cancelError.message);
-          
-          // Cập nhật trạng thái trong database cho shipping
-          await supabase
-            .from('shipping')
-            .update({ status: 'cancelled' })
-            .eq('orderCode', shippingData.orderCode);
-        }
+      // Try to cancel on GHN
+      let ghnCancelled = false;
+      try {
+        await GHNService.cancelOrder(data.ghn_code);
+        ghnCancelled = true;
+      } catch (err) {
+        console.error('Error cancelling GHN order:', err);
+        // Continue anyway, we'll mark as cancelled in our system
       }
       
-      // Cập nhật trạng thái đơn hàng
-      const { error: updateError } = await supabase
+      // Update order status
+      await supabase
         .from('orders')
         .update({ 
-          status: 'cancelled',
+          status: 'cancelled', 
           shipping_status: 'cancelled',
           updated_at: new Date().toISOString()
         })
         .eq('id', orderId);
       
-      if (updateError) throw updateError;
-      
-      return { success: true, message: 'Order marked as cancelled' };
+      return {
+        success: true,
+        ghnCancelled: ghnCancelled
+      };
     } catch (error: any) {
       console.error('Error marking order as cancelled:', error);
-      return { success: false, message: error.message };
+      return {
+        success: false,
+        message: error.message
+      };
     }
   },
 };
