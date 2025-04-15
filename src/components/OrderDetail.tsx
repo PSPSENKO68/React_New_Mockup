@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { Camera, Upload, TruckIcon, CheckCircle, X, AlertCircle } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import GHNService from '../lib/ghnService';
+import { increaseInventoryOnOrderCancellation } from '../lib/inventoryManager';
 
 interface OrderDetail {
   id: string;
@@ -60,6 +61,8 @@ export function OrderDetail() {
   // Camera state
   const [showCamera, setShowCamera] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+
+  const [cancellingOrder, setCancellingOrder] = useState(false);
 
   useEffect(() => {
     fetchOrderDetails();
@@ -480,6 +483,86 @@ export function OrderDetail() {
     }
   };
 
+  // Add function to handle GHN order cancellation
+  const handleCancelGHNOrder = async (): Promise<void> => {
+    if (!orderId || !order) return;
+    
+    if (!confirm('Bạn có chắc chắn muốn hủy đơn hàng này? Đơn hàng sẽ bị hủy trên GHN và không thể khôi phục.')) {
+      return;
+    }
+    
+    try {
+      setCancellingOrder(true);
+      setError(null);
+      
+      // First cancel the order on GHN
+      const result = await GHNService.markOrderAsCancelled(orderId);
+      
+      if (!result.success) {
+        throw new Error(result.message || 'Không thể hủy đơn hàng trên GHN');
+      }
+      
+      // Restore inventory after cancellation
+      await increaseInventoryOnOrderCancellation(orderId);
+      
+      // Update local state
+      setOrder({
+        ...order,
+        status: 'cancelled'
+      });
+      
+      setSuccessMessage('Đã hủy đơn hàng thành công');
+      
+    } catch (err: any) {
+      console.error('Lỗi khi hủy đơn hàng:', err);
+      setError(`Có lỗi xảy ra khi hủy đơn hàng: ${err.message}`);
+    } finally {
+      setCancellingOrder(false);
+    }
+  };
+
+  // Add a new function for cancelling a pending order (before GHN creation)
+  const handleCancelPendingOrder = async (): Promise<void> => {
+    if (!orderId || !order) return;
+    
+    if (!confirm('Bạn có chắc chắn muốn hủy đơn hàng này?')) {
+      return;
+    }
+    
+    try {
+      setCancellingOrder(true);
+      setError(null);
+      
+      // Update order status in database to cancelled
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({ 
+          status: 'cancelled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', orderId);
+      
+      if (updateError) throw updateError;
+      
+      // Restore inventory after cancellation
+      await increaseInventoryOnOrderCancellation(orderId);
+      
+      // Update local state
+      setOrder({
+        ...order,
+        status: 'cancelled'
+      });
+      
+      setSuccessMessage('Đã hủy đơn hàng thành công');
+      
+    } catch (err: any) {
+      console.error('Lỗi khi hủy đơn hàng:', err);
+      setError(`Có lỗi xảy ra khi hủy đơn hàng: ${err.message}`);
+    } finally {
+      setCancellingOrder(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
@@ -801,23 +884,49 @@ export function OrderDetail() {
                 
                 {/* GHN Order Creation */}
                 {order.proof_image_url && !order.has_ghn_order && (
-                  <button
-                    onClick={createGHNOrder}
-                    className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    disabled={creatingGHN}
-                  >
-                    {creatingGHN ? (
-                      <span className="flex items-center gap-2">
-                        <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
-                        Creating GHN Order...
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2">
-                        <TruckIcon className="w-5 h-5" />
-                        Create GHN Shipping Order
-                      </span>
+                  <div className="mt-4 flex flex-col gap-3">
+                    <button
+                      onClick={createGHNOrder}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                      disabled={creatingGHN || order.status === 'cancelled'}
+                    >
+                      {creatingGHN ? (
+                        <span className="flex items-center gap-2">
+                          <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                          Creating GHN Order...
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <TruckIcon className="w-5 h-5" />
+                          Create GHN Shipping Order
+                        </span>
+                      )}
+                    </button>
+
+                    {order.status !== 'cancelled' && (
+                      <button
+                        onClick={handleCancelPendingOrder}
+                        disabled={cancellingOrder}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                      >
+                        {cancellingOrder ? (
+                          <span className="flex items-center gap-2">
+                            <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                            Đang hủy...
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                              <circle cx="12" cy="12" r="10"></circle>
+                              <line x1="15" y1="9" x2="9" y2="15"></line>
+                              <line x1="9" y1="9" x2="15" y2="15"></line>
+                            </svg>
+                            Hủy đơn hàng
+                          </span>
+                        )}
+                      </button>
                     )}
-                  </button>
+                  </div>
                 )}
               </div>
             )}
@@ -832,7 +941,7 @@ export function OrderDetail() {
                 {order.ghn_code && (
                   <div>
                     <p className="mt-1 text-sm">Order Code: {order.ghn_code}</p>
-                    <div className="mt-3">
+                    <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         onClick={() => {
                           if (order.ghn_code) {
@@ -848,9 +957,60 @@ export function OrderDetail() {
                         </svg>
                         In Vận Đơn
                       </button>
+                      
+                      {order.status !== 'cancelled' && (
+                        <button
+                          onClick={handleCancelGHNOrder}
+                          disabled={cancellingOrder}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                        >
+                          {cancellingOrder ? (
+                            <span className="flex items-center gap-2">
+                              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                              Đang hủy...
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-2">
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="15" y1="9" x2="9" y2="15"></line>
+                                <line x1="9" y1="9" x2="15" y2="15"></line>
+                              </svg>
+                              Hủy đơn hàng
+                            </span>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Also add a cancel button for any pending order (regardless of proof) that is not yet cancelled or sent to GHN */}
+            {!order.has_ghn_order && !order.proof_image_url && order.status !== 'cancelled' && (
+              <div className="mt-4">
+                <button
+                  onClick={handleCancelPendingOrder}
+                  disabled={cancellingOrder}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                >
+                  {cancellingOrder ? (
+                    <span className="flex items-center gap-2">
+                      <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                      Đang hủy...
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="15" y1="9" x2="9" y2="15"></line>
+                        <line x1="9" y1="9" x2="15" y2="15"></line>
+                      </svg>
+                      Hủy đơn hàng
+                    </span>
+                  )}
+                </button>
               </div>
             )}
           </div>

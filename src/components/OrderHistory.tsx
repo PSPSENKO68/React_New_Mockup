@@ -2,25 +2,11 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Link } from 'react-router-dom';
 import GHNService from '../lib/ghnService';
+import { OrderDetail } from '../types/Order';
+import { increaseInventoryOnOrderCancellation } from '../lib/inventoryManager';
 
 interface OrderHistoryProps {
   userId?: string;
-}
-
-interface OrderDetail {
-  id: string;
-  status: string;
-  payment_method: string;
-  payment_status: string;
-  shipping_fee: number;
-  subtotal: number;
-  total: number;
-  created_at: string;
-  shipping_status?: string;
-  ghn_order_code?: string;
-  tracking_url?: string;
-  expected_delivery_time?: string;
-  updated_at: string;
 }
 
 export default function OrderHistory({ userId }: OrderHistoryProps) {
@@ -91,6 +77,18 @@ export default function OrderHistory({ userId }: OrderHistoryProps) {
         .eq('id', orderId);
       
       if (error) throw error;
+      
+      // Restore inventory quantities
+      try {
+        const inventoryResult = await increaseInventoryOnOrderCancellation(orderId);
+        if (inventoryResult.success) {
+          console.log('Inventory restored successfully:', inventoryResult.message);
+        } else {
+          console.error('Failed to restore inventory:', inventoryResult.message);
+        }
+      } catch (inventoryError: any) {
+        console.error('Error restoring inventory:', inventoryError.message);
+      }
       
       // Refresh orders
       if (userId) {

@@ -8,6 +8,7 @@ import VNPayCheckout from '../components/VNPayCheckout';
 import GHNService from '../lib/ghnService';
 import getGHNConfig from '../lib/ghnConfig';
 import { moveFilesFromTempToOrder, updateOrderItemFilePaths } from '../utils/fileStorage';
+import { decreaseInventoryOnOrderCreation } from '../lib/inventoryManager';
 
 type PaymentMethod = 'cod' | 'vnpay';
 type ShippingMethod = 'standard' | 'express';
@@ -502,6 +503,19 @@ export function Payment() {
 
       // Save order ID for further processing
       setOrderCreated(orderData.id);
+
+      // Update inventory quantities after order creation
+      try {
+        const inventoryResult = await decreaseInventoryOnOrderCreation(orderData.id);
+        if (inventoryResult.success) {
+          console.log(inventoryResult.message);
+        } else {
+          console.error('Error updating inventory:', inventoryResult.message);
+        }
+      } catch (inventoryError) {
+        console.error('Failed to update inventory:', inventoryError);
+        // Continue with order process even if inventory update fails
+      }
 
       // Handle payment method
       if (paymentMethod === 'vnpay') {

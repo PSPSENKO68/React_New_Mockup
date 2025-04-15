@@ -1362,6 +1362,50 @@ function Orders() {
       GHNService.printGHNLabel(orderCode);
     });
   };
+
+  // Hàm xử lý thay đổi trạng thái đơn hàng
+  const handleStatusChange = async (orderId: string, newStatus: string, currentStatus: string): Promise<void> => {
+    if (currentStatus === newStatus) return;
+    
+    try {
+      setError(null);
+      
+      // Nếu thay đổi từ trạng thái khác sang "completed" (hoàn thành) - không cần cập nhật tồn kho
+      // vì tồn kho đã được cập nhật khi tạo đơn hàng
+      
+      // Nếu thay đổi sang "cancelled" (đã hủy), tăng lại số lượng trong kho
+      if (newStatus === 'cancelled' && currentStatus !== 'cancelled') {
+        // Import inventoryManager để tăng lại số lượng sản phẩm trong kho
+        const { increaseInventoryOnOrderCancellation } = await import('../lib/inventoryManager');
+        await increaseInventoryOnOrderCancellation(orderId);
+      }
+      
+      // Nếu đổi từ "cancelled" sang trạng thái khác, giảm số lượng trong kho
+      if (currentStatus === 'cancelled' && newStatus !== 'cancelled') {
+        // Import inventoryManager để giảm số lượng sản phẩm trong kho
+        const { decreaseInventoryOnOrderCreation } = await import('../lib/inventoryManager');
+        await decreaseInventoryOnOrderCreation(orderId);
+      }
+      
+      // Cập nhật trạng thái đơn hàng trong cơ sở dữ liệu
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({ status: newStatus })
+        .eq('id', orderId);
+      
+      if (updateError) throw updateError;
+      
+      // Cập nhật UI
+      const updatedOrders = orders.map(order => 
+        order.id === orderId ? { ...order, status: newStatus } : order
+      );
+      setOrders(updatedOrders);
+      
+    } catch (err: any) {
+      console.error('Lỗi khi cập nhật trạng thái đơn hàng:', err);
+      setError(err.message || 'Có lỗi xảy ra khi cập nhật trạng thái đơn hàng');
+    }
+  };
   
   async function fetchOrders() {
     try {
@@ -1643,6 +1687,43 @@ function Orders() {
     );
   });
 
+  // Add a function to handle order cancellation with GHN
+  const handleCancelGHNOrder = async (orderId: string): Promise<void> => {
+    if (!confirm('Bạn có chắc chắn muốn hủy đơn hàng này? Đơn hàng sẽ bị hủy trên GHN và không thể khôi phục.')) {
+      return;
+    }
+    
+    try {
+      setError(null);
+      
+      // Import GHNService and inventoryManager dynamically to handle the cancellation
+      const GHNService = (await import('../lib/ghnService')).default;
+      const { increaseInventoryOnOrderCancellation } = await import('../lib/inventoryManager');
+      
+      // First cancel the order on GHN
+      const result = await GHNService.markOrderAsCancelled(orderId);
+      
+      if (!result.success) {
+        throw new Error(result.message || 'Không thể hủy đơn hàng trên GHN');
+      }
+      
+      // Restore inventory after cancellation
+      await increaseInventoryOnOrderCancellation(orderId);
+      
+      // Update local orders data with the new status
+      const updatedOrders = orders.map(order => 
+        order.id === orderId ? { ...order, status: 'cancelled' } : order
+      );
+      setOrders(updatedOrders);
+      
+      alert('Đã hủy đơn hàng thành công');
+      
+    } catch (err: any) {
+      console.error('Lỗi khi hủy đơn hàng:', err);
+      setError(`Có lỗi xảy ra khi hủy đơn hàng: ${err.message}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between items-center gap-4">
@@ -1754,8 +1835,16 @@ function Orders() {
                         <span>{order.id.substring(0, 8)}</span>
                       </td>
                       <td className="py-3">{order.full_name}</td>
-                      <td className="py-3">{order.email}</td>
-                      <td className="py-3">{new Date(order.created_at).toLocaleString()}</td>
+                      <td className="py-3">
+                        {order.order_items?.map((item: any) => (
+                          <div key={item.id} className="text-sm flex items-center gap-2 mb-1">
+                            <span>
+                              {item.inventory_items?.phone_models?.name} - {item.inventory_items?.case_types?.name}
+                              <span className="text-gray-500"> (x{item.quantity})</span>
+                            </span>
+                          </div>
+                        ))}
+                      </td>
                       <td className="py-3">
                         <span className={`px-2 py-1 rounded-full text-xs ${
                           order.status === 'completed' ? 'bg-green-100 text-green-800' :
@@ -1767,7 +1856,7 @@ function Orders() {
                         </span>
                       </td>
                       <td className="py-3">${order.total.toFixed(2)}</td>
-                      <td className="py-3">{order.order_items?.length || 0}</td>
+                      <td className="py-3">{new Date(order.created_at).toLocaleString()}</td>
                       <td className="py-3">
                         <div className="flex items-center gap-2">
                           <Link 
@@ -1779,17 +1868,33 @@ function Orders() {
                           </Link>
                           
                           {order.has_ghn_order && order.ghn_code && (
-                            <button
-                              onClick={() => printGHNLabel(order.ghn_code)}
-                              className="p-1 hover:bg-gray-100 rounded text-green-600"
-                              title="Print shipping label"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                <polyline points="6 9 6 2 18 2 18 9"></polyline>
-                                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-                                <rect x="6" y="14" width="12" height="8"></rect>
-                              </svg>
-                            </button>
+                            <>
+                              <button
+                                onClick={() => printGHNLabel(order.ghn_code)}
+                                className="p-1 hover:bg-gray-100 rounded text-green-600"
+                                title="In vận đơn"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                  <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                                  <rect x="6" y="14" width="12" height="8"></rect>
+                                </svg>
+                              </button>
+                              
+                              {order.status !== 'cancelled' && (
+                                <button
+                                  onClick={() => handleCancelGHNOrder(order.id)}
+                                  className="p-1 hover:bg-gray-100 rounded text-red-600"
+                                  title="Hủy đơn vận chuyển"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="15" y1="9" x2="9" y2="15"></line>
+                                    <line x1="9" y1="9" x2="15" y2="15"></line>
+                                  </svg>
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>
