@@ -220,9 +220,7 @@ function Dashboard() {
                       </span>
                     </td>
                     <td className="py-3">{formatCurrency(order.total || 0)}</td>
-                    <td className="py-3">
-                      {new Date(order.created_at).toLocaleDateString()} {new Date(order.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                    </td>
+                    <td className="py-3">{new Date(order.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))
               ) : (
@@ -1331,14 +1329,12 @@ function Orders() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [downloadLoading, setDownloadLoading] = useState(false);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [dateFilter, setDateFilter] = useState<string>('');
 
   useEffect(() => {
     fetchOrders();
   }, []);
-
-  useEffect(() => {
-    filterOrders();
-  }, [orders, searchQuery, startDate, endDate]);
 
   async function fetchOrders() {
     try {
@@ -1367,7 +1363,6 @@ function Orders() {
 
       if (error) throw error;
       setOrders(data || []);
-      setFilteredOrders(data || []);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -1375,109 +1370,14 @@ function Orders() {
     }
   }
 
-  function filterOrders() {
-    let filtered = [...orders];
-    
-    // Filter by search query
-    if (searchQuery) {
-      filtered = filtered.filter(order => 
-        order.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        order.id.toString().includes(searchQuery)
-      );
-    }
-    
-    // Filter by start date
-    if (startDate) {
-      const start = new Date(startDate);
-      start.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(order => new Date(order.created_at) >= start);
-    }
-    
-    // Filter by end date
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      filtered = filtered.filter(order => new Date(order.created_at) <= end);
-    }
-    
-    setFilteredOrders(filtered);
-  }
-
-  function clearDateFilters() {
-    setStartDate('');
-    setEndDate('');
-  }
-
   async function downloadFile(filePath: string): Promise<Blob | null> {
     try {
-      if (!filePath) {
-        console.error('Empty file path provided');
-        return null;
-      }
-
-      // More robust handling of different path formats
-      let storagePath = filePath;
-      
-      // If it's a full URL
-      if (filePath.startsWith('http')) {
-        try {
-          const url = new URL(filePath);
-          const pathParts = url.pathname.split('/');
-          // Find 'case-assets' in the path and get everything after it
-          const caseAssetsIndex = pathParts.findIndex(part => part === 'case-assets' || part === 'object' || part === 'storage');
-          if (caseAssetsIndex >= 0 && pathParts.length > caseAssetsIndex + 1) {
-            storagePath = pathParts.slice(caseAssetsIndex + 1).join('/');
-          }
-        } catch (err) {
-          console.error('Error parsing URL:', err);
-        }
-      } 
-      // If it's a path that starts with case-assets/ or storage/, remove the prefix
-      else if (filePath.includes('case-assets/')) {
-        storagePath = filePath.split('case-assets/')[1];
-      } else if (filePath.includes('storage/')) {
-        storagePath = filePath.split('storage/')[1];
-      }
-      
-      if (!storagePath) {
-        console.error('Invalid storage path format:', filePath);
-        return null;
-      }
-
-      // Clean up the path - remove any duplicate slashes, URL encoded characters, etc.
-      storagePath = decodeURIComponent(storagePath).replace(/\/+/g, '/').trim();
-      
-      console.log('Attempting to download file with path:', storagePath);
-
-      // Get file from Supabase storage with error handling
       const { data, error } = await supabase.storage
         .from('case-assets')
-        .download(storagePath);
+        .download(filePath);
       
       if (error || !data) {
         console.error('Error downloading file:', error);
-        
-        // Try alternate download method if the first one fails
-        try {
-          const { data: publicUrlData } = await supabase.storage
-            .from('case-assets')
-            .getPublicUrl(storagePath);
-            
-          if (publicUrlData?.publicUrl) {
-            console.log('Trying alternate download via public URL');
-            const response = await fetch(publicUrlData.publicUrl);
-            if (response.ok) {
-              const blobData = await response.blob();
-              return blobData;
-            } else {
-              console.error('Public URL fetch failed with status:', response.status);
-            }
-          }
-        } catch (fetchErr) {
-          console.error('Error with alternate download method:', fetchErr);
-        }
-        
         return null;
       }
       
@@ -1512,50 +1412,41 @@ function Orders() {
         alert('No designs available for this item');
         return;
       }
-      
+
       // Create new JSZip instance
       const zip = new JSZip();
       const promises: Promise<void>[] = [];
-      let filesAdded = false;
       
-          // Download mockup design if available
-          if (item.mockup_design_url) {
-            const mockupPromise = downloadFile(item.mockup_design_url)
-              .then((fileData: Blob | null) => {
-                if (fileData) {
-                  const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_mockup.png`;
-                  zip.file(fileName, fileData);
-              filesAdded = true;
-                }
-              })
-              .catch((err: any) => console.error('Error downloading mockup file:', err));
-            
-            promises.push(mockupPromise);
-          }
-          
-          // Download custom design if available
-          if (item.custom_design_url) {
-            const customPromise = downloadFile(item.custom_design_url)
-              .then((fileData: Blob | null) => {
-                if (fileData) {
-                  const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_custom.png`;
-                  zip.file(fileName, fileData);
-              filesAdded = true;
-                }
-              })
-              .catch((err: any) => console.error('Error downloading custom file:', err));
-            
-            promises.push(customPromise);
-          }
+      // Download mockup design if available
+      if (item.mockup_design_url) {
+        const mockupPromise = downloadFile(item.mockup_design_url)
+          .then((fileData: Blob | null) => {
+            if (fileData) {
+              const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_mockup.png`;
+              zip.file(fileName, fileData);
+            }
+          })
+          .catch((err: any) => console.error('Error downloading mockup file:', err));
+        
+        promises.push(mockupPromise);
+      }
+      
+      // Download custom design if available
+      if (item.custom_design_url) {
+        const customPromise = downloadFile(item.custom_design_url)
+          .then((fileData: Blob | null) => {
+            if (fileData) {
+              const fileName = `Order_${order.id.substring(0, 8)}_${item.id.substring(0, 8)}_custom.png`;
+              zip.file(fileName, fileData);
+            }
+          })
+          .catch((err: any) => console.error('Error downloading custom file:', err));
+        
+        promises.push(customPromise);
+      }
       
       // Wait for all downloads to complete
       await Promise.all(promises);
-      
-      // Check if any files were added
-      if (!filesAdded) {
-        alert('Unable to download any designs. The files may be missing or inaccessible.');
-        return;
-      }
       
       // Generate the zip file
       const content = await zip.generateAsync({ type: 'blob' });
@@ -1589,7 +1480,6 @@ function Orders() {
       const zip = new JSZip();
       const promises: Promise<void>[] = [];
       const selectedOrders = orders.filter(order => selectedOrderIds.includes(order.id));
-      let filesAdded = false;
       
       // Process each selected order
       for (const order of selectedOrders) {
@@ -1612,7 +1502,6 @@ function Orders() {
                     : `product_${item.id.substring(0, 8)}`;
                   const fileName = `${productName}_mockup.png`;
                   orderFolder.file(fileName, fileData);
-                  filesAdded = true;
                 }
               })
               .catch((err: any) => console.error('Error downloading mockup file:', err));
@@ -1630,7 +1519,6 @@ function Orders() {
                     : `product_${item.id.substring(0, 8)}`;
                   const fileName = `${productName}_custom.png`;
                   orderFolder.file(fileName, fileData);
-                  filesAdded = true;
                 }
               })
               .catch((err: any) => console.error('Error downloading custom file:', err));
@@ -1642,13 +1530,6 @@ function Orders() {
       
       // Wait for all downloads to complete
       await Promise.all(promises);
-      
-      // Check if any files were added
-      if (!filesAdded) {
-        alert('Unable to download any designs. The files may be missing or inaccessible.');
-        setDownloadLoading(false);
-        return;
-      }
       
       // Generate the zip file
       const content = await zip.generateAsync({ type: 'blob' });
@@ -1676,32 +1557,14 @@ function Orders() {
       // Filter orders by date if dateFilter is provided
       let filteredOrdersByDate = orders;
       if (dateFilter) {
-        try {
-          const filterDate = new Date(dateFilter);
-          
-          // Check if date is valid
-          if (isNaN(filterDate.getTime())) {
-            throw new Error('Invalid date format');
-          }
-          
-          filteredOrdersByDate = orders.filter(order => {
-            try {
-              const orderDate = new Date(order.created_at);
-              return orderDate.toDateString() === filterDate.toDateString();
-            } catch (dateErr) {
-              console.error('Error parsing order date:', dateErr);
-              return false;
-            }
-          });
+        const filterDate = new Date(dateFilter);
+        filteredOrdersByDate = orders.filter(order => {
+          const orderDate = new Date(order.created_at);
+          return orderDate.toDateString() === filterDate.toDateString();
+        });
 
-          if (filteredOrdersByDate.length === 0) {
-            alert('No orders found for the selected date');
-            setDownloadLoading(false);
-            return;
-          }
-        } catch (dateErr) {
-          console.error('Error with date filter:', dateErr);
-          alert('Invalid date format. Please select a valid date.');
+        if (filteredOrdersByDate.length === 0) {
+          alert('No orders found for the selected date');
           setDownloadLoading(false);
           return;
         }
@@ -1709,26 +1572,11 @@ function Orders() {
 
       const zip = new JSZip();
       const promises: Promise<void>[] = [];
-      let filesAdded = false;
 
       // Group designs by order
       for (const order of filteredOrdersByDate) {
-        // Safety check for order properties
-        if (!order || !order.id) {
-          console.error('Invalid order object:', order);
-          continue;
-        }
-        
-        // Create a safe folder name by removing characters that are invalid in filenames
-        const safeName = (order.full_name || 'Unknown')
-          .replace(/[\\/:*?"<>|]/g, '_')  // Replace invalid filename chars
-          .substring(0, 50);              // Limit length
-        
-        const orderFolder = zip.folder(`Order_${order.id.substring(0, 8)}_${safeName}`);
-        if (!orderFolder) {
-          console.error('Failed to create folder for order:', order.id);
-          continue;
-        }
+        const orderFolder = zip.folder(`Order_${order.id.substring(0, 8)}_${order.full_name}`);
+        if (!orderFolder) continue;
 
         for (const item of order.order_items) {
           if (item.custom_design_url) {
@@ -1737,7 +1585,6 @@ function Orders() {
                 if (fileData && orderFolder) {
                   const fileName = `item_${item.id.substring(0, 8)}_custom.png`;
                   orderFolder.file(fileName, fileData);
-                  filesAdded = true;
                 }
               })
               .catch((err: any) => console.error('Download error:', err));
@@ -1750,7 +1597,6 @@ function Orders() {
                 if (fileData && orderFolder) {
                   const fileName = `item_${item.id.substring(0, 8)}_mockup.png`;
                   orderFolder.file(fileName, fileData);
-                  filesAdded = true;
                 }
               })
               .catch((err: any) => console.error('Download error:', err));
@@ -1760,14 +1606,6 @@ function Orders() {
       }
 
       await Promise.all(promises);
-      
-      // Check if any files were added
-      if (!filesAdded) {
-        alert('Unable to download any designs. The files may be missing or inaccessible.');
-        setDownloadLoading(false);
-        return;
-      }
-      
       const content = await zip.generateAsync({ type: 'blob' });
 
       const link = document.createElement('a');
@@ -1808,23 +1646,23 @@ function Orders() {
               onChange={(e) => setDateFilter(e.target.value)}
               className="px-3 py-2 border rounded-lg"
             />
-        <button
+            <button
               onClick={downloadAllDesignsByDate}
               disabled={downloadLoading || !dateFilter}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400"
-        >
-          {downloadLoading ? (
-            <>
-              <Loader className="w-4 h-4 animate-spin" />
-              <span>Downloading...</span>
-            </>
-          ) : (
-            <>
-              <Download className="w-4 h-4" />
+            >
+              {downloadLoading ? (
+                <>
+                  <Loader className="w-4 h-4 animate-spin" />
+                  <span>Downloading...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
                   <span>Download by Date</span>
-            </>
-          )}
-        </button>
+                </>
+              )}
+            </button>
           </div>
           
           <button
@@ -1855,8 +1693,8 @@ function Orders() {
 
       <div className="bg-white rounded-xl shadow-sm">
         <div className="p-6">
-          <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
-            <div className="flex-1 relative w-full">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="flex-1 relative">
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
@@ -1865,35 +1703,6 @@ function Orders() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
-            </div>
-            
-            <div className="flex items-center gap-3 w-full md:w-auto">
-              <div className="flex-1">
-                <label className="text-sm text-gray-500 mb-1 block">Start Date</label>
-                <input
-                  type="date"
-                  className="w-full p-2 border rounded-lg"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
-              </div>
-              <div className="flex-1">
-                <label className="text-sm text-gray-500 mb-1 block">End Date</label>
-                <input
-                  type="date"
-                  className="w-full p-2 border rounded-lg"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
-              </div>
-              {(startDate || endDate) && (
-                <button
-                  onClick={clearDateFilters}
-                  className="mt-6 text-sm text-gray-600 hover:text-gray-900"
-                >
-                  Clear
-                </button>
-              )}
             </div>
           </div>
 
@@ -1943,8 +1752,8 @@ function Orders() {
                         {order.order_items?.map((item: any) => (
                           <div key={item.id} className="text-sm flex items-center gap-2 mb-1">
                             <span>
-                            {item.inventory_items?.phone_models?.name} - {item.inventory_items?.case_types?.name}
-                            <span className="text-gray-500"> (x{item.quantity})</span>
+                              {item.inventory_items?.phone_models?.name} - {item.inventory_items?.case_types?.name}
+                              <span className="text-gray-500"> (x{item.quantity})</span>
                             </span>
                             {(item.custom_design_url || item.mockup_design_url) && (
                               <button
@@ -1970,7 +1779,7 @@ function Orders() {
                       </td>
                       <td className="py-3">${order.total.toFixed(2)}</td>
                       <td className="py-3">
-                        {new Date(order.created_at).toLocaleDateString()} {new Date(order.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        {new Date(order.created_at).toLocaleDateString()}
                       </td>
                       <td className="py-3 text-right">
                         <Link
@@ -1982,13 +1791,6 @@ function Orders() {
                       </td>
                     </tr>
                   ))}
-                  {filteredOrders.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="py-4 text-center text-gray-500">
-                        No orders found matching your filters
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
