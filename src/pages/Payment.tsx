@@ -613,7 +613,13 @@ export function Payment() {
           ...prev,
           fullName: data.full_name || prev.fullName,
           phoneNumber: data.phone || prev.phoneNumber,
-          email: data.email || user.email || prev.email
+          email: user.email || data.email || prev.email // Ensure user.email takes priority
+        }));
+      } else {
+        // If no profile data yet, still fill in the email from the user object
+        setFormData(prev => ({
+          ...prev,
+          email: user.email || prev.email
         }));
       }
     } catch (error) {
@@ -780,6 +786,11 @@ export function Payment() {
                         {user && (
                           <p className="text-xs text-gray-500 mt-1">
                             Email được liên kết với tài khoản của bạn và không thể thay đổi.
+                          </p>
+                        )}
+                        {!user && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Bạn có thể tùy chỉnh email, nhưng trường này không được để trống.
                           </p>
                         )}
                       </div>

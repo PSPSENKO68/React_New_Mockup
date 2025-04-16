@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import VNPayService from '../lib/vnpayService';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
@@ -69,18 +68,6 @@ export default function VNPayCheckout({
       
       // Create a unique transaction reference
       const txnRef = existingPayment?.vnp_txn_ref || `${orderId.substring(0, 8)}-${Date.now()}`;
-      
-      // If no existing payment, create one
-      if (!existingPayment) {
-        await supabase
-          .from('vnpay_payments')
-          .insert({
-            order_id: orderId,
-            vnp_txn_ref: txnRef,
-            amount: order.total,
-            transaction_status: 'pending'
-          });
-      }
       
       // Call Supabase Edge Function to create VNPay payment URL
       const { data, error: fnError } = await supabase.functions.invoke('create-vnpay-payment', {
@@ -207,21 +194,29 @@ export function VNPayReturn() {
   
   async function verifyPayment(vnpParams: Record<string, string>) {
     try {
-      // Call verify payment function
-      const result = await VNPayService.verifyPaymentReturn(vnpParams);
+      // Call the verify-vnpay-payment Edge Function
+      const { data, error: fnError } = await supabase.functions.invoke('verify-vnpay-payment', {
+        body: vnpParams
+      });
       
-      if (result.isSuccess) {
+      if (fnError) {
+        throw new Error(`Verification error: ${fnError.message}`);
+      }
+      
+      if (data?.isSuccess) {
         setStatus('success');
       } else {
         setStatus('failed');
+        setError(data?.message || 'Payment verification failed');
       }
       
-      if (result.orderId) {
-        setOrderId(result.orderId);
+      if (data?.orderId) {
+        setOrderId(data.orderId);
       }
     } catch (err: any) {
       setStatus('failed');
       setError(err.message);
+      console.error('Error verifying payment:', err);
     }
   }
   
