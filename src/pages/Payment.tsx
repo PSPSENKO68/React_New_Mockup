@@ -12,7 +12,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-hot-toast';
 
 type PaymentMethod = 'cod' | 'vnpay';
-type ShippingMethod = 'standard' | 'express';
 
 interface LocationOption {
   id: number | string;
@@ -56,7 +55,6 @@ const FALLBACK_WARDS: Record<string, LocationOption[]> = {
 export function Payment() {
   const navigate = useNavigate();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cod');
-  const [shippingMethod, setShippingMethod] = useState<ShippingMethod>('standard');
   const [isLoading, setIsLoading] = useState(false);
   const [showVNPayCheckout, setShowVNPayCheckout] = useState(false);
   const { items, clearCart } = useCart();
@@ -184,7 +182,7 @@ export function Payment() {
     }
   }, [formData.districtId]);
 
-  // When location is complete or shipping method changes, calculate shipping fee
+  // When location is complete, calculate shipping fee
   useEffect(() => {
     if (formData.districtId && formData.wardCode) {
       if (apiAvailable) {
@@ -193,7 +191,7 @@ export function Payment() {
         calculateFallbackShippingFee();
       }
     }
-  }, [formData.districtId, formData.wardCode, shippingMethod, apiAvailable]);
+  }, [formData.districtId, formData.wardCode, apiAvailable]);
 
   // Load provinces from GHN service or use fallback
   async function fetchProvinces() {
@@ -279,23 +277,18 @@ export function Payment() {
     }
   }
 
-  // Calculate fallback shipping fee when API is not available
   function calculateFallbackShippingFee() {
-    setCalculatingFee(true);
-    
     try {
-      // Calculate based on item count and shipping method
-      const itemCount = items.reduce((total, item) => total + (item.quantity || 1), 0);
+      setCalculatingFee(true);
       
-      // Base price for standard shipping
-      let basePrice = 4.99;
-      // Additional price per item after the first
-      let additionalPrice = 0.99;
+      // Get the number of items
+      const itemCount = items.reduce((count, item) => count + (item.quantity || 1), 0);
       
-      if (shippingMethod === 'express') {
-        basePrice = 9.99;
-        additionalPrice = 1.99;
-      }
+      // Base price for standard shipping (first item)
+      const basePrice = 4.99;
+      
+      // Price for each additional item
+      const additionalPrice = 0.99;
       
       // Calculate total shipping fee
       const fee = basePrice + Math.max(0, itemCount - 1) * additionalPrice;
@@ -304,7 +297,7 @@ export function Payment() {
     } catch (error) {
       console.error('Error calculating fallback shipping fee:', error);
       // Set a default shipping fee if calculation fails
-      setShippingFee(shippingMethod === 'standard' ? 4.99 : 9.99);
+      setShippingFee(4.99);
     } finally {
       setCalculatingFee(false);
     }
@@ -340,11 +333,8 @@ export function Payment() {
       
       // Check if valid data returned
       if (response && typeof response === 'object' && ('total' in response)) {
-        // Adjust fee based on shipping method (express is 30% more)
+        // Use standard fee
         let fee: number = Number(response.total) || 0;
-        if (shippingMethod === 'express') {
-          fee = Math.round(fee * 1.3);
-        }
         
         // Convert from VND to USD (approximate)
         setShippingFee(Math.round((fee / 23000) * 100) / 100);
@@ -1006,64 +996,38 @@ export function Payment() {
                         />
                         <span className="ml-3">Thanh toán qua VNPAY</span>
                       </label>
-                      </div>
                     </div>
+                  </div>
                     
-                  {/* Shipping Method */}
+                  {/* Shipping Information - Remove selection UI */}
                   <div className="bg-white p-6 rounded-lg shadow-sm">
                     <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
                       <Truck className="w-5 h-5" />
                       Phương thức vận chuyển
                     </h2>
-                    <div className="space-y-3">
-                      <label className="flex items-center justify-between p-4 border rounded-lg cursor-pointer hover:bg-gray-50">
-                        <div className="flex items-center">
-                          <input
-                            type="radio"
-                            name="shipping"
-                            value="standard"
-                            checked={shippingMethod === 'standard'}
-                            onChange={() => setShippingMethod('standard')}
-                            className="w-4 h-4"
-                          />
-                          <span className="ml-3">Giao hàng tiêu chuẩn (2-3 ngày)</span>
-                        </div>
+                    <div className="p-4 border rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <span>Giao hàng tiêu chuẩn (2-3 ngày)</span>
                         <span className="font-semibold">
                           {calculatingFee ? 'Đang tính...' : `$${shippingFee.toFixed(2)}`}
                         </span>
-                      </label>
-                      <label className="flex items-center justify-between p-4 border rounded-lg cursor-pointer hover:bg-gray-50">
-                        <div className="flex items-center">
-                          <input
-                            type="radio"
-                            name="shipping"
-                            value="express"
-                            checked={shippingMethod === 'express'}
-                            onChange={() => setShippingMethod('express')}
-                            className="w-4 h-4"
-                          />
-                          <span className="ml-3">Giao hàng nhanh (1 ngày)</span>
-                        </div>
-                        <span className="font-semibold">
-                          {calculatingFee ? 'Đang tính...' : `$${(shippingFee * 1.3).toFixed(2)}`}
-                        </span>
-                      </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Order Summary */}
+                {/* Order Summary */}
                 <div className="md:col-span-1">
                   <div className="bg-white p-6 rounded-lg shadow-sm sticky top-24">
                     <h2 className="text-xl font-semibold mb-4">Tóm tắt đơn hàng</h2>
                     
                     <div className="space-y-4 mb-4">
-                  <div className="flex justify-between">
+                      <div className="flex justify-between">
                         <span className="text-gray-600">Tạm tính</span>
-                    <span>${subtotal.toFixed(2)}</span>
-                  </div>
+                        <span>${subtotal.toFixed(2)}</span>
+                      </div>
                       
-                  <div className="flex justify-between">
+                      <div className="flex justify-between">
                         <span className="text-gray-600">Phí vận chuyển</span>
                         <span>
                           {calculatingFee ? 'Đang tính...' : `$${shippingFee.toFixed(2)}`}
@@ -1129,12 +1093,12 @@ export function Payment() {
                             <div className="font-medium">${item.price.toFixed(2)}</div>
                           </div>
                         ))}
-                  </div>
+                      </div>
                     </div>
                   </div>
+                </div>
               </div>
-            </div>
-          </form>
+            </form>
           )}
         </div>
       </div>
