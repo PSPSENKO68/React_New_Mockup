@@ -140,8 +140,20 @@ function Dashboard() {
 
   if (error) {
     return (
-      <div className="bg-red-50 text-red-500 p-4 rounded-lg">
-        {error}
+      <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md flex items-center space-x-3 animate-fadeIn">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <span className="font-medium">{error}</span>
+        <button 
+          onClick={() => setError('')} 
+          className="ml-auto text-red-500 hover:text-red-700"
+          aria-label="Close"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
     );
   }
@@ -601,7 +613,12 @@ function Inventory() {
       if (error) throw error;
       fetchInventory();
     } catch (err: any) {
-      setError(err.message);
+      // Check for foreign key constraint violation with order_items
+      if (err.message.includes('violates foreign key constraint "order_items_inventory_item_id_fkey"')) {
+        setError('Không thể xóa: Sản phẩm này đã tồn tại trong đơn hàng của khách hàng.');
+      } else {
+        setError(err.message);
+      }
     }
   }
 
@@ -633,8 +650,20 @@ function Inventory() {
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-500 p-4 rounded-lg">
-          {error}
+        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md flex items-center space-x-3 animate-fadeIn">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="font-medium">{error}</span>
+          <button 
+            onClick={() => setError('')} 
+            className="ml-auto text-red-500 hover:text-red-700"
+            aria-label="Close"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
 
@@ -1132,7 +1161,13 @@ function PhoneModels() {
       if (error) throw error;
       fetchPhoneModels();
     } catch (err: any) {
-      setError(err.message);
+      // Check for foreign key constraint violation
+      if (err.message.includes('violates foreign key constraint') && 
+          err.message.includes('order_items_inventory_item_id_fkey')) {
+        setError('Không thể xóa: Sản phẩm này đã tồn tại trong đơn hàng của khách hàng.');
+      } else {
+        setError(err.message);
+      }
     }
   }
 
@@ -1150,8 +1185,20 @@ function PhoneModels() {
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-500 p-4 rounded-lg">
-          {error}
+        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md flex items-center space-x-3 animate-fadeIn">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="font-medium">{error}</span>
+          <button 
+            onClick={() => setError('')} 
+            className="ml-auto text-red-500 hover:text-red-700"
+            aria-label="Close"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
 
@@ -1715,8 +1762,20 @@ function Orders() {
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-500 p-4 rounded-lg">
-          {error}
+        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md flex items-center space-x-3 animate-fadeIn">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="font-medium">{error}</span>
+          <button 
+            onClick={() => setError('')} 
+            className="ml-auto text-red-500 hover:text-red-700"
+            aria-label="Close"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
 
@@ -1944,8 +2003,20 @@ function AdminUsers() {
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-500 p-4 rounded-lg">
-          {error}
+        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md flex items-center space-x-3 animate-fadeIn">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="font-medium">{error}</span>
+          <button 
+            onClick={() => setError('')} 
+            className="ml-auto text-red-500 hover:text-red-700"
+            aria-label="Close"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
 
@@ -2128,7 +2199,13 @@ function CaseTypes() {
       if (error) throw error;
       fetchCaseTypes();
     } catch (err: any) {
-      setError(err.message);
+      // Check for foreign key constraint violation
+      if (err.message.includes('violates foreign key constraint') && 
+          err.message.includes('order_items_inventory_item_id_fkey')) {
+        setError('Không thể xóa: Sản phẩm này đã tồn tại trong đơn hàng của khách hàng.');
+      } else {
+        setError(err.message);
+      }
     }
   }
 
@@ -2146,8 +2223,20 @@ function CaseTypes() {
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-500 p-4 rounded-lg">
-          {error}
+        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 rounded-lg shadow-md flex items-center space-x-3 animate-fadeIn">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <span className="font-medium">{error}</span>
+          <button 
+            onClick={() => setError('')} 
+            className="ml-auto text-red-500 hover:text-red-700"
+            aria-label="Close"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
 
