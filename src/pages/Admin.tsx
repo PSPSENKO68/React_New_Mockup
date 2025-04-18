@@ -1378,10 +1378,20 @@ function Orders() {
   const [dateFilter, setDateFilter] = useState('');
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [ordersPerPage, setOrdersPerPage] = useState(10);
+  const pageSizeOptions = [5, 10, 20, 50, 100];
 
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  // Reset to page 1 when changing filters or page size
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, dateFilter, ordersPerPage]);
 
   // Toggle order selection for bulk actions
   const toggleOrderSelection = (orderId: string): void => {
@@ -1392,12 +1402,12 @@ function Orders() {
     }
   };
 
-  // Toggle select all orders
+  // Toggle select all orders (only for current page)
   const toggleSelectAll = (): void => {
-    if (selectedOrderIds.length === filteredOrders.length) {
+    if (selectedOrderIds.length === paginatedOrders.length) {
       setSelectedOrderIds([]);
     } else {
-      setSelectedOrderIds(filteredOrders.map(order => order.id));
+      setSelectedOrderIds(paginatedOrders.map(order => order.id));
     }
   };
 
@@ -1594,19 +1604,12 @@ function Orders() {
       setError(null);
 
       // Filter orders by date if dateFilter is provided
-      let filteredOrdersByDate = orders;
-      if (dateFilter) {
-        const filterDate = new Date(dateFilter);
-        filteredOrdersByDate = orders.filter(order => {
-          const orderDate = new Date(order.created_at);
-          return orderDate.toDateString() === filterDate.toDateString();
-        });
-
-        if (filteredOrdersByDate.length === 0) {
-          alert('No orders found for the selected date');
-          setDownloadLoading(false);
-          return;
-        }
+      let filteredOrdersByDate = filteredOrders;
+      
+      if (filteredOrdersByDate.length === 0) {
+        alert('No orders found for the selected filters');
+        setDownloadLoading(false);
+        return;
       }
 
       const zip = new JSZip();
@@ -1662,16 +1665,40 @@ function Orders() {
     }
   };
 
-  // Filter orders based on search query
+  // Filter orders based on search query and date filter
   const filteredOrders = orders.filter(order => {
+    // Skip null or undefined orders
+    if (!order) return false;
+    
     const searchLower = searchQuery.toLowerCase();
-    return (
-      order.id.toLowerCase().includes(searchLower) ||
-      order.full_name.toLowerCase().includes(searchLower) ||
-      order.email.toLowerCase().includes(searchLower) ||
-      order.status.toLowerCase().includes(searchLower)
-    );
+    const matchesSearch = 
+      (order.id?.toLowerCase() || '').includes(searchLower) ||
+      (order.full_name?.toLowerCase() || '').includes(searchLower) ||
+      (order.email?.toLowerCase() || '').includes(searchLower) ||
+      (order.status?.toLowerCase() || '').includes(searchLower);
+    
+    // Apply date filter if set
+    if (dateFilter) {
+      // Skip if order doesn't have a created_at date
+      if (!order.created_at) return false;
+      
+      const filterDate = new Date(dateFilter);
+      filterDate.setHours(0, 0, 0, 0);
+      
+      const orderDate = new Date(order.created_at);
+      orderDate.setHours(0, 0, 0, 0);
+      
+      return matchesSearch && orderDate.getTime() === filterDate.getTime();
+    }
+    
+    return matchesSearch;
   });
+
+  // Calculate pagination
+  const indexOfLastOrder = currentPage * ordersPerPage;
+  const indexOfFirstOrder = indexOfLastOrder - ordersPerPage;
+  const paginatedOrders = filteredOrders.slice(indexOfFirstOrder, indexOfLastOrder);
+  const totalPages = Math.ceil(filteredOrders.length / ordersPerPage);
 
   // Add a function to handle order cancellation with GHN
   const handleCancelGHNOrder = async (orderId: string): Promise<void> => {
@@ -1724,7 +1751,7 @@ function Orders() {
             />
             <button
               onClick={downloadAllDesignsByDate}
-              disabled={downloadLoading || !dateFilter}
+              disabled={downloadLoading}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400"
             >
               {downloadLoading ? (
@@ -1735,7 +1762,7 @@ function Orders() {
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  <span>Download by Date</span>
+                  <span>Download Designs</span>
                 </>
               )}
             </button>
@@ -1781,7 +1808,7 @@ function Orders() {
 
       <div className="bg-white rounded-xl shadow-sm">
         <div className="p-6">
-          <div className="flex items-center gap-4 mb-6">
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
             <div className="flex-1 relative">
               <Search className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
               <input
@@ -1792,115 +1819,204 @@ function Orders() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Records per page:</span>
+              <select
+                className="border rounded-lg px-2 py-1"
+                value={ordersPerPage}
+                onChange={(e) => setOrdersPerPage(Number(e.target.value))}
+              >
+                {pageSizeOptions.map(size => (
+                  <option key={size} value={size}>{size}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {loading ? (
             <div className="text-center py-4">Loading...</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 pl-3">
-                      <input 
-                        type="checkbox"
-                        checked={selectedOrderIds.length === filteredOrders.length && filteredOrders.length > 0}
-                        onChange={toggleSelectAll}
-                        className="w-4 h-4"
-                      />
-                    </th>
-                    <th className="text-left py-3">Order ID</th>
-                    <th className="text-left py-3">Customer</th>
-                    <th className="text-left py-3">Items</th>
-                    <th className="text-left py-3">Status</th>
-                    <th className="text-left py-3">Total</th>
-                    <th className="text-left py-3">Date</th>
-                    <th className="text-right py-3">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredOrders.map(order => (
-                    <tr key={order.id} className="border-b hover:bg-gray-50">
-                      <td className="py-3 pl-4">
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-3 pl-3">
                         <input 
                           type="checkbox"
-                          checked={selectedOrderIds.includes(order.id)}
-                          onChange={() => toggleOrderSelection(order.id)} 
-                          className="h-4 w-4"
+                          checked={paginatedOrders.length > 0 && selectedOrderIds.length === paginatedOrders.length}
+                          onChange={toggleSelectAll}
+                          className="w-4 h-4"
                         />
-                      </td>
-                      <td className="py-3">
-                        <span>{order.id.substring(0, 8)}</span>
-                      </td>
-                      <td className="py-3">{order.full_name}</td>
-                      <td className="py-3">
-                        {order.order_items?.map((item: any) => (
-                          <div key={item.id} className="text-sm flex items-center gap-2 mb-1">
-                            <span>
-                              {item.inventory_items?.phone_models?.name} - {item.inventory_items?.case_types?.name}
-                              <span className="text-gray-500"> (x{item.quantity})</span>
-                            </span>
-                          </div>
-                        ))}
-                      </td>
-                      <td className="py-3">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          order.status === 'completed' ? 'bg-green-100 text-green-800' :
-                          order.status === 'processing' ? 'bg-blue-100 text-blue-800' :
-                          order.status === 'cancelled' ? 'bg-red-100 text-red-800' : 
-                          'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {order.status}
-                        </span>
-                      </td>
-                      <td className="py-3">${order.total.toFixed(2)}</td>
-                      <td className="py-3">{new Date(order.created_at).toLocaleString()}</td>
-                      <td className="py-3">
-                        <div className="flex items-center gap-2">
-                          <Link 
-                            to={`/admin/orders/${order.id}`}
-                            className="p-1 hover:bg-gray-100 rounded text-blue-600"
-                            title="View order details"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Link>
-                          
-                          {order.has_ghn_order && order.ghn_code && (
-                            <>
-                              <button
-                                onClick={() => printGHNLabel(order.ghn_code)}
-                                className="p-1 hover:bg-gray-100 rounded text-green-600"
-                                title="In vận đơn"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                  <polyline points="6 9 6 2 18 2 18 9"></polyline>
-                                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-                                  <rect x="6" y="14" width="12" height="8"></rect>
-                                </svg>
-                              </button>
-                              
-                              {order.status !== 'cancelled' && (
-                                <button
-                                  onClick={() => handleCancelGHNOrder(order.id)}
-                                  className="p-1 hover:bg-gray-100 rounded text-red-600"
-                                  title="Hủy đơn vận chuyển"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <line x1="15" y1="9" x2="9" y2="15"></line>
-                                    <line x1="9" y1="9" x2="15" y2="15"></line>
-                                  </svg>
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </td>
+                      </th>
+                      <th className="text-left py-3">Order ID</th>
+                      <th className="text-left py-3">Customer</th>
+                      <th className="text-left py-3">Items</th>
+                      <th className="text-left py-3">Status</th>
+                      <th className="text-left py-3">Total</th>
+                      <th className="text-left py-3">Date</th>
+                      <th className="text-right py-3">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {paginatedOrders.length > 0 ? (
+                      paginatedOrders.map(order => (
+                        <tr key={order.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 pl-4">
+                            <input 
+                              type="checkbox"
+                              checked={selectedOrderIds.includes(order.id)}
+                              onChange={() => toggleOrderSelection(order.id)} 
+                              className="h-4 w-4"
+                            />
+                          </td>
+                          <td className="py-3">
+                            <span>{order.id.substring(0, 8)}</span>
+                          </td>
+                          <td className="py-3">{order.full_name}</td>
+                          <td className="py-3">
+                            {order.order_items?.map((item: any) => (
+                              <div key={item.id} className="text-sm flex items-center gap-2 mb-1">
+                                <span>
+                                  {item.inventory_items?.phone_models?.name} - {item.inventory_items?.case_types?.name}
+                                  <span className="text-gray-500"> (x{item.quantity})</span>
+                                </span>
+                              </div>
+                            ))}
+                          </td>
+                          <td className="py-3">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              order.status === 'completed' ? 'bg-green-100 text-green-800' :
+                              order.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                              order.status === 'cancelled' ? 'bg-red-100 text-red-800' : 
+                              'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {order.status}
+                            </span>
+                          </td>
+                          <td className="py-3">${order.total.toFixed(2)}</td>
+                          <td className="py-3">{new Date(order.created_at).toLocaleString()}</td>
+                          <td className="py-3">
+                            <div className="flex items-center gap-2 justify-end">
+                              <Link 
+                                to={`/admin/orders/${order.id}`}
+                                className="p-1 hover:bg-gray-100 rounded text-blue-600"
+                                title="View order details"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Link>
+                              
+                              {order.has_ghn_order && order.ghn_code && (
+                                <>
+                                  <button
+                                    onClick={() => printGHNLabel(order.ghn_code)}
+                                    className="p-1 hover:bg-gray-100 rounded text-green-600"
+                                    title="In vận đơn"
+                                  >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                      <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                                      <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                                      <rect x="6" y="14" width="12" height="8"></rect>
+                                    </svg>
+                                  </button>
+                                  
+                                  {order.status !== 'cancelled' && (
+                                    <button
+                                      onClick={() => handleCancelGHNOrder(order.id)}
+                                      className="p-1 hover:bg-gray-100 rounded text-red-600"
+                                      title="Hủy đơn vận chuyển"
+                                    >
+                                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <line x1="15" y1="9" x2="9" y2="15"></line>
+                                        <line x1="9" y1="9" x2="15" y2="15"></line>
+                                      </svg>
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={8} className="py-4 text-center text-gray-500">
+                          No orders found matching the current filters
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Pagination Controls */}
+              {filteredOrders.length > 0 && (
+                <div className="flex items-center justify-between mt-6">
+                  <div className="text-sm text-gray-500">
+                    Showing {indexOfFirstOrder + 1}-{Math.min(indexOfLastOrder, filteredOrders.length)} of {filteredOrders.length} orders
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(currentPage - 1)}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1 border rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    
+                    {/* Page numbers */}
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pageNum = i + 1;
+                        
+                        // If more than 5 pages and we're not at the start
+                        if (totalPages > 5 && currentPage > 3) {
+                          pageNum = currentPage - 3 + i;
+                        }
+                        
+                        // Make sure we don't exceed totalPages
+                        if (pageNum > totalPages) return null;
+                        
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setCurrentPage(pageNum)}
+                            className={`w-8 h-8 flex items-center justify-center rounded-md ${
+                              currentPage === pageNum 
+                                ? 'bg-blue-600 text-white' 
+                                : 'bg-white text-gray-700 border hover:bg-gray-50'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                      
+                      {totalPages > 5 && currentPage < totalPages - 2 && (
+                        <>
+                          <span className="mx-1">...</span>
+                          <button
+                            onClick={() => setCurrentPage(totalPages)}
+                            className="w-8 h-8 flex items-center justify-center rounded-md border bg-white text-gray-700 hover:bg-gray-50"
+                          >
+                            {totalPages}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    
+                    <button
+                      onClick={() => setCurrentPage(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1 border rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
