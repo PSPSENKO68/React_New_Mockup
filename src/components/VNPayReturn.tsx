@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { moveFilesFromTempToOrder, updateOrderItemFilePaths } from '../utils/fileStorage';
+import { getOrCreateAnonymousId } from '../utils/userIdentifier';
+import { useCart } from '../contexts/CartContext';
 
 export function VNPayReturn() {
   const [searchParams] = useSearchParams();
   const [paymentStatus, setPaymentStatus] = useState('Đang xử lý thanh toán...');
   const [isSuccess, setIsSuccess] = useState<boolean | null>(null);
   const navigate = useNavigate();
+  const anonymousUserId = getOrCreateAnonymousId();
+  const { clearCart } = useCart();
 
   useEffect(() => {
     async function processPayment() {
@@ -17,10 +22,6 @@ export function VNPayReturn() {
         const txnRef = searchParams.get('vnp_TxnRef');
         const amount = searchParams.get('vnp_Amount');
         const bankCode = searchParams.get('vnp_BankCode');
-        const bankTranNo = searchParams.get('vnp_BankTranNo');
-        const payDate = searchParams.get('vnp_PayDate');
-        const transactionNo = searchParams.get('vnp_TransactionNo');
-        const secureHash = searchParams.get('vnp_SecureHash');
         const orderInfo = searchParams.get('vnp_OrderInfo');
 
         console.log('VNPay parameters:', {
@@ -55,6 +56,50 @@ export function VNPayReturn() {
                 console.error('Error updating order status:', orderError);
               } else {
                 console.log('Successfully updated order status to paid');
+                
+                // Di chuyển các file từ thư mục temp sang thư mục order
+                try {
+                  console.log(`Moving files for user ${anonymousUserId} from temp to order folder`);
+                  const { success, newPaths } = await moveFilesFromTempToOrder(anonymousUserId);
+                  
+                  if (success) {
+                    console.log(`Successfully moved ${newPaths.length} files to order folder`);
+                    
+                    // Cập nhật đường dẫn file trong order_items
+                    if (newPaths.length > 0) {
+                      // Lấy danh sách order items
+                      const { data: orderItems } = await supabase
+                        .from('order_items')
+                        .select('id, custom_design_url, mockup_design_url')
+                        .eq('order_id', orderId);
+                      
+                      if (orderItems && orderItems.length > 0) {
+                        for (const item of orderItems) {
+                          // Cập nhật đường dẫn của custom_design_url
+                          if (item.custom_design_url && item.custom_design_url.startsWith('temp/')) {
+                            const fileName = item.custom_design_url.split('/').pop();
+                            const newPath = `order/${anonymousUserId}/${fileName}`;
+                            await updateOrderItemFilePaths(orderId, item.custom_design_url, newPath);
+                          }
+                          
+                          // Cập nhật đường dẫn của mockup_design_url
+                          if (item.mockup_design_url && item.mockup_design_url.startsWith('temp/')) {
+                            const fileName = item.mockup_design_url.split('/').pop();
+                            const newPath = `order/${anonymousUserId}/${fileName}`;
+                            await updateOrderItemFilePaths(orderId, item.mockup_design_url, newPath);
+                          }
+                        }
+                        
+                        console.log('Updated file paths in order_items successfully');
+                      }
+                    }
+                  } else {
+                    console.error('Failed to move files from temp to order folder');
+                  }
+                } catch (fileError) {
+                  console.error('Error moving files:', fileError);
+                  // Tiếp tục xử lý ngay cả khi di chuyển file thất bại
+                }
               }
             } catch (dbError) {
               console.error('Database error:', dbError);
@@ -70,6 +115,14 @@ export function VNPayReturn() {
             bankCode,
             orderId: orderId || ''
           }));
+
+          // Xóa giỏ hàng sau khi thanh toán thành công
+          try {
+            await clearCart();
+            console.log('Cart cleared successfully after payment');
+          } catch (clearCartError) {
+            console.error('Error clearing cart:', clearCartError);
+          }
 
           // Chuyển hướng người dùng sau 3 giây
           setTimeout(() => {
@@ -110,7 +163,7 @@ export function VNPayReturn() {
     }
 
     processPayment();
-  }, [searchParams, navigate]);
+  }, [searchParams, navigate, anonymousUserId, clearCart]);
 
   // Hàm lấy thông báo lỗi dựa trên mã lỗi VNPay
   function getErrorMessage(errorCode: string): string {

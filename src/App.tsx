@@ -19,6 +19,9 @@ import { Account } from './pages/Account';
 import { ConfirmEmail } from './pages/Account/ConfirmEmail';
 import { ConfirmError } from './pages/Account/ConfirmError';
 import { VNPayReturn } from './components/VNPayReturn';
+import { ForgotPassword } from './pages/Account/ForgotPassword';
+import { ResetPassword } from './pages/Account/ResetPassword';
+import { Toaster } from 'react-hot-toast';
 
 function App() {
   const location = useLocation();
@@ -48,6 +51,8 @@ function App() {
             <Route path="/account/register" element={<Register />} />
             <Route path="/account/confirm" element={<ConfirmEmail />} />
             <Route path="/account/confirm-error" element={<ConfirmError />} />
+            <Route path="/account/forgot-password" element={<ForgotPassword />} />
+            <Route path="/account/reset-password" element={<ResetPassword />} />
             
             <Route
               path="/admin/*"
@@ -61,6 +66,7 @@ function App() {
           {/* Only show Footer if not on admin routes */}
           {!isAdminRoute && <Footer />}
           <DebugInfo />
+          <Toaster position="top-center" />
         </div>
       </CartProvider>
     </AuthProvider>

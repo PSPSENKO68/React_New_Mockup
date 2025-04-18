@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui';
-import { User, Package, LogOut } from 'lucide-react';
+import { User, Package, LogOut, Lock, Check, AlertCircle, Search, X, Calendar, ShoppingBag } from 'lucide-react';
 
 interface UserProfile {
   id: string;
@@ -38,6 +38,7 @@ export function Account() {
   const [activeTab, setActiveTab] = useState('profile');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -46,6 +47,23 @@ export function Account() {
   const [phone, setPhone] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [updateMessage, setUpdateMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
+
+  // State for password change
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordUpdateMessage, setPasswordUpdateMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+
+  // State for canceling orders
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [cancelOrderMessage, setCancelOrderMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
+
+  // State for order search
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchStatus, setSearchStatus] = useState<string>('');
 
   useEffect(() => {
     if (!user) {
@@ -56,6 +74,40 @@ export function Account() {
     fetchUserProfile();
     fetchOrders();
   }, [user]);
+
+  // Apply filters whenever orders, searchTerm or searchStatus changes
+  useEffect(() => {
+    filterOrders();
+  }, [orders, searchTerm, searchStatus]);
+
+  // Filter orders based on search criteria
+  const filterOrders = () => {
+    let results = [...orders];
+    
+    // Filter by search term (id or items)
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase().trim();
+      results = results.filter(order => 
+        order.id.toLowerCase().includes(term) ||
+        order.order_items.some(item => 
+          item.inventory_item_id?.toLowerCase().includes(term)
+        )
+      );
+    }
+    
+    // Filter by status
+    if (searchStatus) {
+      results = results.filter(order => order.status === searchStatus);
+    }
+    
+    setFilteredOrders(results);
+  };
+
+  // Clear search filters
+  const clearFilters = () => {
+    setSearchTerm('');
+    setSearchStatus('');
+  };
 
   // Fetch user profile from database
   const fetchUserProfile = async () => {
@@ -190,6 +242,100 @@ export function Account() {
     }
   };
 
+  // Handle password change
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordUpdateMessage(null);
+    setPasswordLoading(true);
+    
+    try {
+      // Validate passwords
+      if (newPassword.length < 6) {
+        throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự');
+      }
+      
+      if (newPassword !== confirmPassword) {
+        throw new Error('Mật khẩu mới và xác nhận mật khẩu không khớp');
+      }
+      
+      // First verify current password
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user?.email || '',
+        password: currentPassword
+      });
+      
+      if (signInError) {
+        throw new Error('Mật khẩu hiện tại không chính xác');
+      }
+      
+      // Update password
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+      
+      if (error) throw error;
+      
+      setPasswordUpdateMessage({ type: 'success', text: 'Đổi mật khẩu thành công' });
+      
+      // Reset form
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setIsChangingPassword(false);
+    } catch (error: any) {
+      console.error('Error changing password:', error.message);
+      setPasswordUpdateMessage({ type: 'error', text: error.message });
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  // Handle order cancellation
+  const handleCancelOrder = async (orderId: string) => {
+    setIsCancelling(true);
+    setCancellingOrderId(orderId);
+    setCancelOrderMessage(null);
+    
+    try {
+      // Update order status to 'cancelled'
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: 'cancelled' })
+        .eq('id', orderId);
+      
+      if (error) throw error;
+      
+      setCancelOrderMessage({ 
+        type: 'success', 
+        text: 'Đơn hàng đã được hủy thành công' 
+      });
+      
+      // Refresh orders list
+      await fetchOrders();
+      
+      // Auto close message after 3 seconds
+      setTimeout(() => {
+        setCancelOrderMessage(null);
+        setIsCancelling(false);
+        setCancellingOrderId(null);
+      }, 3000);
+      
+    } catch (error: any) {
+      console.error('Error cancelling order:', error);
+      setCancelOrderMessage({ 
+        type: 'error', 
+        text: 'Không thể hủy đơn hàng. Vui lòng thử lại sau.' 
+      });
+      setIsCancelling(false);
+    }
+  };
+
+  // Check if order can be cancelled
+  // Only allow cancellation for pending or processing orders
+  const canCancelOrder = (status: string) => {
+    return ['pending', 'processing'].includes(status);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 pt-20 flex items-center justify-center">
@@ -308,34 +454,221 @@ export function Account() {
               ) : (
                 <div className="space-y-4">
                   <div>
-                    <h3 className="text-sm font-medium text-gray-500">Họ và tên</h3>
-                    <p className="text-lg">{profile?.full_name}</p>
+                    <p className="text-sm text-gray-500">Email</p>
+                    <p className="font-medium">{profile?.email || user?.email}</p>
                   </div>
-                  
                   <div>
-                    <h3 className="text-sm font-medium text-gray-500">Email</h3>
-                    <p className="text-lg">{profile?.email}</p>
+                    <p className="text-sm text-gray-500">Họ và tên</p>
+                    <p className="font-medium">{profile?.full_name || 'Chưa cập nhật'}</p>
                   </div>
-                  
                   <div>
-                    <h3 className="text-sm font-medium text-gray-500">Số điện thoại</h3>
-                    <p className="text-lg">{profile?.phone}</p>
+                    <p className="text-sm text-gray-500">Số điện thoại</p>
+                    <p className="font-medium">{profile?.phone || 'Chưa cập nhật'}</p>
                   </div>
-                  
-                  <div className="pt-2">
+                  <div>
+                    <p className="text-sm text-gray-500">Tài khoản tạo lúc</p>
+                    <p className="font-medium">{profile?.created_at ? formatDate(profile.created_at) : 'N/A'}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
                     <button
                       onClick={() => setIsEditing(true)}
-                      className="px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800"
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-black hover:bg-gray-800"
                     >
-                      Chỉnh sửa thông tin
+                      <User size={16} />
+                      Cập nhật thông tin
+                    </button>
+                    
+                    <button
+                      onClick={() => setIsChangingPassword(true)}
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      <Lock size={16} />
+                      Đổi mật khẩu
                     </button>
                   </div>
+                </div>
+              )}
+              
+              {/* Password change form */}
+              {isChangingPassword && (
+                <div className="mt-8 border-t pt-6">
+                  <h3 className="text-lg font-semibold mb-4">Đổi mật khẩu</h3>
+                  
+                  {passwordUpdateMessage && (
+                    <div className={`p-3 rounded-lg mb-4 ${
+                      passwordUpdateMessage.type === 'success' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+                    }`}>
+                      <div className="flex items-start">
+                        {passwordUpdateMessage.type === 'success' ? 
+                          <Check className="h-5 w-5 mr-2 flex-shrink-0" /> : 
+                          <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
+                        }
+                        <p>{passwordUpdateMessage.text}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <form onSubmit={handleChangePassword} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Mật khẩu hiện tại
+                      </label>
+                      <input
+                        type="password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-black focus:border-black"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Mật khẩu mới
+                      </label>
+                      <input
+                        type="password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        required
+                        minLength={6}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-black focus:border-black"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Xác nhận mật khẩu mới
+                      </label>
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-black focus:border-black"
+                      />
+                    </div>
+                    
+                    <div className="flex items-center gap-3 pt-2">
+                      <button
+                        type="submit"
+                        disabled={passwordLoading}
+                        className="inline-flex items-center gap-2 px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-black hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      >
+                        {passwordLoading ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Đang cập nhật...
+                          </>
+                        ) : (
+                          <>
+                            <Lock size={16} />
+                            Cập nhật mật khẩu
+                          </>
+                        )}
+                      </button>
+                      
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsChangingPassword(false);
+                          setCurrentPassword('');
+                          setNewPassword('');
+                          setConfirmPassword('');
+                          setPasswordUpdateMessage(null);
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                      >
+                        Hủy
+                      </button>
+                    </div>
+                    
+                    <div className="text-sm text-gray-500 mt-4">
+                      <p>Quên mật khẩu hiện tại? <Link to="/account/forgot-password" className="text-black font-medium hover:underline">Đặt lại mật khẩu</Link></p>
+                    </div>
+                  </form>
                 </div>
               )}
             </TabsContent>
             
             <TabsContent value="orders" className="bg-white rounded-lg shadow-sm p-6">
               <h2 className="text-xl font-semibold mb-4">Đơn hàng của tôi</h2>
+              
+              {/* Cancel order message */}
+              {cancelOrderMessage && (
+                <div className={`p-3 rounded-lg mb-4 ${
+                  cancelOrderMessage.type === 'success' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+                }`}>
+                  <div className="flex items-start">
+                    {cancelOrderMessage.type === 'success' ? 
+                      <Check className="h-5 w-5 mr-2 flex-shrink-0" /> : 
+                      <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
+                    }
+                    <p>{cancelOrderMessage.text}</p>
+                  </div>
+                </div>
+              )}
+              
+              {/* Order search and filter */}
+              {orders.length > 0 && (
+                <div className="mb-6 bg-gray-50 p-4 rounded-lg">
+                  <div className="flex flex-col md:flex-row gap-4">
+                    {/* Search input */}
+                    <div className="flex-1">
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                          <Search className="w-5 h-5 text-gray-400" />
+                        </div>
+                        <input
+                          type="text"
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          placeholder="Tìm kiếm theo mã đơn hàng hoặc sản phẩm"
+                          className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-black focus:border-black"
+                        />
+                        {searchTerm && (
+                          <button 
+                            onClick={() => setSearchTerm('')}
+                            className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Status filter */}
+                    <div className="w-full md:w-48">
+                      <select
+                        value={searchStatus}
+                        onChange={(e) => setSearchStatus(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-black focus:border-black"
+                      >
+                        <option value="">Tất cả trạng thái</option>
+                        <option value="pending">Chờ xác nhận</option>
+                        <option value="processing">Đang xử lý</option>
+                        <option value="shipping">Đang giao hàng</option>
+                        <option value="delivered">Đã giao hàng</option>
+                        <option value="cancelled">Đã hủy</option>
+                      </select>
+                    </div>
+                    
+                    {/* Clear filters button */}
+                    {(searchTerm || searchStatus) && (
+                      <button
+                        onClick={clearFilters}
+                        className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                      >
+                        <X className="w-4 h-4 mr-2" />
+                        Xóa bộ lọc
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
               
               {orders.length === 0 ? (
                 <div className="text-center py-12">
@@ -348,9 +681,20 @@ export function Account() {
                     Mua sắm ngay
                   </button>
                 </div>
+              ) : filteredOrders.length === 0 ? (
+                <div className="text-center py-12">
+                  <Search size={48} className="mx-auto text-gray-300 mb-4" />
+                  <p className="text-gray-500">Không tìm thấy đơn hàng nào phù hợp</p>
+                  <button
+                    onClick={clearFilters}
+                    className="mt-4 px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Xóa bộ lọc
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-6">
-                  {orders.map((order) => (
+                  {filteredOrders.map((order) => (
                     <div key={order.id} className="border rounded-lg p-4">
                       <div className="flex justify-between items-center mb-3">
                         <div>
@@ -404,13 +748,36 @@ export function Account() {
                         </div>
                       </div>
                       
-                      <div className="mt-4">
+                      <div className="mt-4 flex justify-between items-center">
                         <button
                           onClick={() => navigate(`/order-confirmation/${order.id}`)}
                           className="text-sm text-black hover:underline"
                         >
                           Xem chi tiết đơn hàng
                         </button>
+                        
+                        {canCancelOrder(order.status) && (
+                          <button
+                            onClick={() => handleCancelOrder(order.id)}
+                            disabled={isCancelling && cancellingOrderId === order.id}
+                            className="inline-flex items-center px-3 py-1.5 border border-red-300 text-sm font-medium rounded text-red-700 bg-white hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isCancelling && cancellingOrderId === order.id ? (
+                              <>
+                                <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Đang hủy...
+                              </>
+                            ) : (
+                              <>
+                                <X className="w-4 h-4 mr-1" />
+                                Hủy đơn hàng
+                              </>
+                            )}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}

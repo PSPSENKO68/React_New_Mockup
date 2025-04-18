@@ -9,6 +9,7 @@ import GHNService from '../lib/ghnService';
 import { moveFilesFromTempToOrder, updateOrderItemFilePaths } from '../utils/fileStorage';
 import { decreaseInventoryOnOrderCreation } from '../lib/inventoryManager';
 import { useAuth } from '../contexts/AuthContext';
+import { toast } from 'react-hot-toast';
 
 type PaymentMethod = 'cod' | 'vnpay';
 type ShippingMethod = 'standard' | 'express';
@@ -95,6 +96,9 @@ export function Payment() {
 
   // Add state for image URLs, similar to Cart component
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  
+  // Add inventory error state
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
   
   // Load public URLs for stored images when cart items change
   useEffect(() => {
@@ -387,6 +391,60 @@ export function Payment() {
     return !phoneError;
   };
 
+  // Check if all items in the cart are available in inventory
+  const checkInventoryAvailability = async (): Promise<boolean> => {
+    setIsLoading(true);
+    setInventoryError(null);
+    
+    try {
+      // Create a list to track out-of-stock items
+      const outOfStockItems: string[] = [];
+      
+      // Check each item in the cart
+      for (const item of items) {
+        const { data, error } = await supabase
+          .from('inventory_items')
+          .select('quantity')
+          .eq('id', item.inventoryItemId)
+          .single();
+        
+        if (error) {
+          console.error('Error fetching inventory for item:', error);
+          throw new Error(`Không thể kiểm tra tồn kho cho sản phẩm ${item.name}`);
+        }
+        
+        // Check if the requested quantity exceeds available stock
+        if (!data || data.quantity < item.quantity) {
+          const availableQty = data ? data.quantity : 0;
+          outOfStockItems.push(`${item.name} (${item.phoneName}) - Chỉ còn ${availableQty} sản phẩm`);
+        }
+      }
+      
+      // If any items are out of stock, notify the user
+      if (outOfStockItems.length > 0) {
+        const message = `Các sản phẩm sau đã hết hàng hoặc không đủ số lượng:\n${outOfStockItems.join('\n')}`;
+        setInventoryError(message.replace(/\n/g, '<br/>'));
+        toast.error('Một số sản phẩm trong giỏ hàng của bạn đã hết hàng');
+        
+        // After 5 seconds, redirect to cart
+        setTimeout(() => {
+          navigate('/cart');
+        }, 5000);
+        
+        return false;
+      }
+      
+      // All items are available
+      return true;
+    } catch (error: any) {
+      console.error('Error checking inventory:', error);
+      setInventoryError(`Lỗi kiểm tra tồn kho: ${error.message}`);
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handlePlaceOrder = async (e: FormEvent) => {
     e.preventDefault();
     
@@ -407,6 +465,12 @@ export function Payment() {
     
     // Validate phone before submitting
     if (!validatePhoneNumber(formData.phoneNumber)) {
+      return;
+    }
+    
+    // Check inventory availability before proceeding
+    const inventoryAvailable = await checkInventoryAvailability();
+    if (!inventoryAvailable) {
       return;
     }
 
@@ -649,6 +713,30 @@ export function Payment() {
                     Không thể kết nối đến dịch vụ vận chuyển. Đang sử dụng phí vận chuyển ước tính.
                   </p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Show inventory error message if any */}
+          {inventoryError && (
+            <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg p-4 mb-6">
+              <div className="flex items-start">
+                <AlertCircle className="w-5 h-5 mt-0.5 mr-2 flex-shrink-0" />
+                <div>
+                  <h3 className="font-semibold mb-2">Thông báo tồn kho</h3>
+                  <div dangerouslySetInnerHTML={{ __html: inventoryError }}></div>
+                  <p className="mt-2 text-sm">Bạn sẽ được chuyển hướng về trang giỏ hàng sau 5 giây...</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Show loading state */}
+          {isLoading && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white p-6 rounded-lg shadow-lg max-w-sm w-full text-center">
+                <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-black mx-auto mb-4"></div>
+                <p>Đang xử lý...</p>
               </div>
             </div>
           )}

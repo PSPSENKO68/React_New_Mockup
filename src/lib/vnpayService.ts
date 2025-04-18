@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { moveFilesFromTempToOrder, updateOrderItemFilePaths } from '../utils/fileStorage';
 import vnpayClient from './vnpayClient';
-import { BuildPaymentUrl, ReturnQueryFromVNPay, ProductCode, VnpLocale } from 'vnpay';
+import { BuildPaymentUrl, ProductCode, VnpLocale } from 'vnpay';
 
 // We're no longer using the VNPay class directly
 // Instead we use our custom implementation for all VNPay operations
@@ -91,11 +91,6 @@ export const VNPayService = {
           message: 'Missing required fields from VNPay response',
         };
       }
-      
-      // Since we can't fully resolve the type issues, 
-      // we'll verify manually using the secureSecret
-      const secureSecret = import.meta.env.VITE_VNPAY_HASH_SECRET;
-      const vnpSecureHash = vnpParams['vnp_SecureHash'];
       
       // Perform simple validation for now
       const isValidSignature = true; // Simplified for now due to type constraints
@@ -277,20 +272,6 @@ export const VNPayService = {
       return null;
     }
   },
-
-  /**
-   * Xác thực chữ ký từ VNPay (dùng cho IPN callback)
-   */
-  async verifySignature(vnpParams: Record<string, string>): Promise<boolean> {
-    try {
-      // Due to type constraints, we'll implement a simpler verification
-      // In a production environment, this should be replaced with proper validation
-      return true; // Simplified for now due to type constraints
-    } catch (error) {
-      console.error('Error in verifySignature:', error);
-      return false;
-    }
-  }
 };
 
 export default VNPayService; 

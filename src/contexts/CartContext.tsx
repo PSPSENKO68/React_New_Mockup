@@ -408,6 +408,29 @@ const clearCartStorage = () => {
   }
 };
 
+// Add this function to check inventory availability
+const checkInventoryAvailability = async (inventoryItemId: string, requestedQuantity: number): Promise<boolean> => {
+  try {
+    // Get current inventory quantity
+    const { data, error } = await supabase
+      .from('inventory_items')
+      .select('quantity')
+      .eq('id', inventoryItemId)
+      .single();
+    
+    if (error) throw error;
+    
+    // If no data found, assume no inventory
+    if (!data) return false;
+    
+    // Check if requested quantity is available
+    return data.quantity >= requestedQuantity;
+  } catch (error) {
+    console.error('Error checking inventory:', error);
+    return false; // In case of error, assume unavailable to be safe
+  }
+};
+
 export const CartProvider = ({ children }: { children: ReactNode }) => {
   const [items, setItems] = useState<CartItem[]>(() => {
     // Initialize from storage if available
@@ -518,7 +541,7 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
   // Check if max cart limit is reached
   const isMaxCartReached = cartCount >= MAX_CART_ITEMS;
 
-  // Add item to cart
+  // Modify the addToCart function
   const addToCart = async (item: CartItem) => {
     setIsLoading(true);
     setError(null);
@@ -539,6 +562,18 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
         quantity: item.quantity || 1,
         anonymousUserId: anonymousUserId // Thêm ID người dùng ẩn danh vào mỗi item
       };
+      
+      // Check inventory availability
+      if (itemWithQuantity.inventoryItemId) {
+        const isAvailable = await checkInventoryAvailability(
+          itemWithQuantity.inventoryItemId, 
+          itemWithQuantity.quantity
+        );
+        
+        if (!isAvailable) {
+          throw new Error('Sorry, this item is out of stock or not available in the requested quantity');
+        }
+      }
       
       if (isUpdate) {
         // We're updating an existing item
@@ -696,7 +731,7 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Update item quantity
+  // Modify updateQuantity function to check inventory
   const updateQuantity = async (id: string, quantity: number) => {
     // Don't allow quantity less than 1
     if (quantity < 1) return;
@@ -709,6 +744,18 @@ export const CartProvider = ({ children }: { children: ReactNode }) => {
       
       if (!itemToUpdate) {
         throw new Error('Item not found');
+      }
+      
+      // Check inventory availability if increasing quantity
+      if (quantity > itemToUpdate.quantity && itemToUpdate.inventoryItemId) {
+        const isAvailable = await checkInventoryAvailability(
+          itemToUpdate.inventoryItemId, 
+          quantity
+        );
+        
+        if (!isAvailable) {
+          throw new Error('Sorry, the requested quantity is not available in stock');
+        }
       }
       
       // Update the cart item
