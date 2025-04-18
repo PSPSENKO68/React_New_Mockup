@@ -23,7 +23,7 @@ export function ForgotPassword() {
     try {
       // Sử dụng Supabase API để gửi email đặt lại mật khẩu
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/account/reset-password`,
+        redirectTo: `https://lylycase.vercel.app/account/reset-password`,
       });
 
       if (error) throw error;

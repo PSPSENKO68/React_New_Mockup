@@ -40,6 +40,9 @@ export const ConfirmError = () => {
       const { error } = await supabase.auth.resend({
         type: 'signup',
         email: email,
+        options: {
+          emailRedirectTo: 'https://lylycase.vercel.app/account/login'
+        }
       });
       
       if (error) {

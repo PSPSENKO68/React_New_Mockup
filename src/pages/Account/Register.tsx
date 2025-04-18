@@ -54,7 +54,8 @@ export function Register() {
           data: {
             full_name: fullName,
             phone: phone
-          }
+          },
+          emailRedirectTo: 'https://lylycase.vercel.app/account/login'
         }
       });
 
@@ -100,7 +101,10 @@ export function Register() {
     try {
       const { error } = await supabase.auth.resend({
         type: 'signup',
-        email: email
+        email: email,
+        options: {
+          emailRedirectTo: 'https://lylycase.vercel.app/account/login'
+        }
       });
       
       if (error) throw error;
