@@ -138,7 +138,18 @@ serve(async (req) => {
       
       try {
         // Convert amount to VND (mandatory for VNPay)
-        const amountInVND = Math.floor(amount * 23000);
+        // VNPay requires the amount to be in VND and multiplied by 100
+        // For example, 50,000 VND should be sent as 5000000
+        // Minimum amount is usually 10,000 VND (1000000 after multiplication)
+        let amountInVND = Math.floor(amount * 23000);
+        
+        // Ensure the amount is at least 10,000 VND for testing
+        if (amountInVND < 10000) {
+          amountInVND = 10000;
+        }
+        
+        // Multiply by 100 as required by VNPay
+        const vnpayAmount = amountInVND * 100;
         
         // Get client IP
         const clientIp = req.headers.get('x-forwarded-for') || 
@@ -150,7 +161,7 @@ serve(async (req) => {
         
         console.log('Building payment URL with params:', {
           tmnCode: vnpayTmnCode,
-          amount: amountInVND,
+          amount: vnpayAmount,
           orderId,
           txnRef: transactionRef,
           ipAddr: clientIp,
@@ -158,12 +169,9 @@ serve(async (req) => {
           createDate
         });
         
-        // Try using a fixed amount for testing
-        const testAmount = 10000; // 10,000 VND for testing
-        
         // Create payment URL with all required parameters
         const paymentParams: Record<string, string | number> = {
-          vnp_Amount: testAmount, // Use test amount instead of amountInVND
+          vnp_Amount: vnpayAmount,
           vnp_Command: 'pay',
           vnp_CreateDate: createDate,
           vnp_CurrCode: 'VND',
@@ -214,7 +222,7 @@ serve(async (req) => {
             paymentUrl,
             txnRef: transactionRef,
             debug: {
-              testAmount,
+              vnpayAmount,
               originalAmount: amountInVND,
               tmnCodeConfigured: !!vnpayTmnCode,
               returnUrlConfigured: !!vnpayReturnUrl,

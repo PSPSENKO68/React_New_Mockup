@@ -18,6 +18,7 @@ import { Register } from './pages/Account/Register';
 import { Account } from './pages/Account';
 import { ConfirmEmail } from './pages/Account/ConfirmEmail';
 import { ConfirmError } from './pages/Account/ConfirmError';
+import { VNPayReturn } from './components/VNPayReturn';
 
 function App() {
   const location = useLocation();
@@ -36,6 +37,7 @@ function App() {
             <Route path="/custom-design" element={<CustomDesign />} />
             <Route path="/cart" element={<Cart />} />
             <Route path="/payment" element={<Payment />} />
+            <Route path="/payment/vnpay-return" element={<VNPayReturn />} />
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/diagnostic" element={<Diagnostic />} />
             <Route path="/order-confirmation/:orderId" element={<OrderConfirmation />} />
