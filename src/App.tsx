@@ -29,12 +29,15 @@ function App() {
   // Check if the current path is an admin route
   const isAdminRoute = location.pathname.startsWith('/admin');
   
+  // Check if the current path is the VNPAY return route
+  const isVNPayReturn = location.pathname === '/payment/vnpay-return';
+  
   return (
     <AuthProvider>
       <CartProvider>
         <div className="min-h-screen bg-white">
-          {/* Only show Navigation if not on admin routes */}
-          {!isAdminRoute && <Navigation />}
+          {/* Only show Navigation if not on admin routes and not on VNPAY return */}
+          {!isAdminRoute && !isVNPayReturn && <Navigation />}
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/custom-design" element={<CustomDesign />} />
@@ -63,8 +66,8 @@ function App() {
               }
             />
           </Routes>
-          {/* Only show Footer if not on admin routes */}
-          {!isAdminRoute && <Footer />}
+          {/* Only show Footer if not on admin routes and not on VNPAY return */}
+          {!isAdminRoute && !isVNPayReturn && <Footer />}
           <DebugInfo />
           <Toaster position="top-center" />
         </div>
