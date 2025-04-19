@@ -13,6 +13,19 @@ export function VNPayReturn() {
   const anonymousUserId = getOrCreateAnonymousId();
   const { clearCart } = useCart();
 
+  // Thêm useEffect để vô hiệu hóa scroll trên body khi component được mount
+  useEffect(() => {
+    // Lưu trạng thái scroll ban đầu
+    const originalStyle = window.getComputedStyle(document.body).overflow;
+    // Vô hiệu hóa scroll
+    document.body.style.overflow = 'hidden';
+    
+    // Khôi phục lại khi component unmount
+    return () => {
+      document.body.style.overflow = originalStyle;
+    };
+  }, []);
+
   useEffect(() => {
     async function processPayment() {
       try {
@@ -188,52 +201,60 @@ export function VNPayReturn() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-8 text-center">
-        {isSuccess === true && (
-          <div className="mb-6">
-            <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
+    <>
+      {/* Overlay toàn màn hình để chặn người dùng tương tác */}
+      <div 
+        className="fixed inset-0 bg-black bg-opacity-50 z-50"
+        style={{ pointerEvents: 'all' }}
+      />
+      
+      <div className="fixed inset-0 flex items-center justify-center z-50">
+        <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-8 text-center">
+          {isSuccess === true && (
+            <div className="mb-6">
+              <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
             </div>
-          </div>
-        )}
-        
-        {isSuccess === false && (
-          <div className="mb-6">
-            <div className="w-20 h-20 mx-auto bg-red-100 rounded-full flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+          )}
+          
+          {isSuccess === false && (
+            <div className="mb-6">
+              <div className="w-20 h-20 mx-auto bg-red-100 rounded-full flex items-center justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
             </div>
-          </div>
-        )}
-        
-        {isSuccess === null && (
-          <div className="mb-6">
-            <div className="w-20 h-20 mx-auto bg-blue-100 rounded-full flex items-center justify-center">
-              <svg className="animate-spin h-10 w-10 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
+          )}
+          
+          {isSuccess === null && (
+            <div className="mb-6">
+              <div className="w-20 h-20 mx-auto bg-blue-100 rounded-full flex items-center justify-center">
+                <svg className="animate-spin h-10 w-10 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
             </div>
+          )}
+          
+          <h2 className="text-2xl font-bold mb-4">
+            {isSuccess === true ? 'Thanh toán thành công' : 
+             isSuccess === false ? 'Thanh toán thất bại' : 
+             'Đang xử lý thanh toán'}
+          </h2>
+          
+          <p className="text-gray-600 mb-8">{paymentStatus}</p>
+          
+          <div className="text-sm text-gray-500">
+            {isSuccess === null ? 'Vui lòng đợi trong khi chúng tôi xử lý đơn hàng của bạn...' : 
+            'Bạn sẽ được chuyển hướng tự động sau vài giây...'}
           </div>
-        )}
-        
-        <h2 className="text-2xl font-bold mb-4">
-          {isSuccess === true ? 'Thanh toán thành công' : 
-           isSuccess === false ? 'Thanh toán thất bại' : 
-           'Đang xử lý thanh toán'}
-        </h2>
-        
-        <p className="text-gray-600 mb-8">{paymentStatus}</p>
-        
-        <div className="text-sm text-gray-500">
-          {isSuccess === null ? 'Vui lòng đợi trong khi chúng tôi xử lý đơn hàng của bạn...' : 
-          'Bạn sẽ được chuyển hướng tự động sau vài giây...'}
         </div>
       </div>
-    </div>
+    </>
   );
 } 
