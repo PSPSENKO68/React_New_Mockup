@@ -47,7 +47,7 @@ export function VNPayReturn() {
 
         // Kiểm tra kết quả thanh toán
         if (responseCode === '00' && transactionStatus === '00') {
-          setPaymentStatus('Thanh toán thành công! Đang xử lý đơn hàng...');
+          setPaymentStatus('Đang xử lý đơn hàng, vui lòng không tắt trang này!');
           setIsSuccess(true);
 
           // Lấy orderId từ orderInfo (Thanh toan don hang {orderId})
