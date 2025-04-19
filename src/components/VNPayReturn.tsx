@@ -34,7 +34,7 @@ export function VNPayReturn() {
 
         // Kiểm tra kết quả thanh toán
         if (responseCode === '00' && transactionStatus === '00') {
-          setPaymentStatus('Thanh toán thành công!');
+          setPaymentStatus('Thanh toán thành công! Đang xử lý đơn hàng...');
           setIsSuccess(true);
 
           // Lấy orderId từ orderInfo (Thanh toan don hang {orderId})
@@ -124,15 +124,13 @@ export function VNPayReturn() {
             console.error('Error clearing cart:', clearCartError);
           }
 
-          // Chuyển hướng người dùng sau 3 giây
-          setTimeout(() => {
-            if (orderId) {
-              navigate(`/order-confirmation/${orderId}`);
-            } else {
-              // Nếu không tìm thấy orderId, chuyển về trang chủ
-              navigate('/');
-            }
-          }, 3000);
+          // Chuyển hướng người dùng sau khi xử lý xong
+          if (orderId) {
+            navigate(`/order-confirmation/${orderId}`);
+          } else {
+            // Nếu không tìm thấy orderId, chuyển về trang chủ
+            navigate('/');
+          }
         } else {
           setPaymentStatus('Thanh toán thất bại!');
           setIsSuccess(false);
@@ -212,6 +210,17 @@ export function VNPayReturn() {
           </div>
         )}
         
+        {isSuccess === null && (
+          <div className="mb-6">
+            <div className="w-20 h-20 mx-auto bg-blue-100 rounded-full flex items-center justify-center">
+              <svg className="animate-spin h-10 w-10 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+          </div>
+        )}
+        
         <h2 className="text-2xl font-bold mb-4">
           {isSuccess === true ? 'Thanh toán thành công' : 
            isSuccess === false ? 'Thanh toán thất bại' : 
@@ -220,17 +229,9 @@ export function VNPayReturn() {
         
         <p className="text-gray-600 mb-8">{paymentStatus}</p>
         
-        <div className="text-sm text-gray-500 mb-6">
-          Bạn sẽ được chuyển hướng tự động sau vài giây...
-        </div>
-        
-        <div className="flex justify-center">
-          <button 
-            onClick={() => navigate('/')}
-            className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-          >
-            Về trang chủ
-          </button>
+        <div className="text-sm text-gray-500">
+          {isSuccess === null ? 'Vui lòng đợi trong khi chúng tôi xử lý đơn hàng của bạn...' : 
+          'Bạn sẽ được chuyển hướng tự động sau vài giây...'}
         </div>
       </div>
     </div>
