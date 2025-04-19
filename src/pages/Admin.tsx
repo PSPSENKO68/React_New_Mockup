@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   PackageSearch,
@@ -2029,7 +2029,24 @@ function AdminUsers() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [newUserRole, setNewUserRole] = useState('admin');
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([
+    'orders', 'inventory', 'phone_models', 'case_types'
+  ]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [currentEditUser, setCurrentEditUser] = useState<any>(null);
+  const [currentEditPermissions, setCurrentEditPermissions] = useState<string[]>([]);
+  const [showPasswordChangeModal, setShowPasswordChangeModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+
+  const availablePermissions = [
+    { id: 'orders', label: 'Orders' },
+    { id: 'inventory', label: 'Inventory' },
+    { id: 'phone_models', label: 'Phone Models' },
+    { id: 'case_types', label: 'Case Types' }
+  ];
 
   useEffect(() => {
     fetchAdmins();
@@ -2039,7 +2056,7 @@ function AdminUsers() {
     try {
       const { data, error } = await supabase
         .from('admin_users')
-        .select('id, email, role, created_at');
+        .select('id, email, role, created_at, permissions, is_active');
 
       if (error) throw error;
       setAdmins(data || []);
@@ -2050,34 +2067,119 @@ function AdminUsers() {
     }
   }
 
+  function handleRoleChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const role = e.target.value;
+    setNewUserRole(role);
+    
+    // If role is admin, select all permissions automatically
+    if (role === 'admin') {
+      setSelectedPermissions(['orders', 'inventory', 'phone_models', 'case_types']);
+    } else {
+      setSelectedPermissions([]);
+    }
+  }
+
+  function handlePermissionChange(permissionId: string) {
+    setSelectedPermissions(prev => {
+      if (prev.includes(permissionId)) {
+        return prev.filter(p => p !== permissionId);
+      } else {
+        return [...prev, permissionId];
+      }
+    });
+  }
+
+  function handleEditPermissionChange(permissionId: string) {
+    setCurrentEditPermissions(prev => {
+      if (prev.includes(permissionId)) {
+        return prev.filter(p => p !== permissionId);
+      } else {
+        return [...prev, permissionId];
+      }
+    });
+  }
+
   async function handleAddAdmin(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
     try {
-      // First create the auth user
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      // Kiểm tra xem email đã tồn tại trong hệ thống chưa
+      const { data: existingAdmins, error: checkError } = await supabase
+        .from('admin_users')
+        .select('id, email, is_active')
+        .ilike('email', newAdminEmail);
+      
+      if (checkError) throw checkError;
+      
+      // Nếu email đã tồn tại và đã bị xóa khỏi admin_users
+      // nhưng có thể vẫn còn trong auth.users
+      if (existingAdmins && existingAdmins.length > 0) {
+        throw new Error(`Email ${newAdminEmail} đã tồn tại trong hệ thống. Vui lòng sử dụng email khác hoặc liên hệ quản trị viên để kích hoạt lại.`);
+      }
+
+      // Generate a temporary password
+      const tempPassword = generateTemporaryPassword();
+      
+      // Use the standard sign up method instead of admin API
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email: newAdminEmail,
-        password: generateTemporaryPassword(), // You should implement this
-        email_confirm: true
+        password: tempPassword,
+        options: {
+          emailRedirectTo: window.location.origin + '/admin/login'
+        }
       });
 
-      if (authError) throw authError;
+      if (authError) {
+        // Nếu lỗi là do email đã tồn tại trong auth.users
+        if (authError.message?.includes('User already registered')) {
+          throw new Error(`Email ${newAdminEmail} đã tồn tại trong hệ thống xác thực. Vui lòng sử dụng email khác.`);
+        }
+        throw authError;
+      }
+      
+      if (!authData.user) {
+        throw new Error('Failed to create user');
+      }
 
-      // Then add to admin_users table
+      // Then add to admin_users table with role and permissions
       const { error: adminError } = await supabase
         .from('admin_users')
         .insert([
           {
             id: authData.user.id,
             email: newAdminEmail,
-            role: 'admin'
+            role: newUserRole,
+            permissions: newUserRole === 'admin' ? 
+              ['orders', 'inventory', 'phone_models', 'case_types'] : 
+              selectedPermissions
           }
         ]);
 
-      if (adminError) throw adminError;
+      if (adminError) {
+        if (adminError.message?.includes('row-level security')) {
+          throw new Error(
+            'Row-level security policy error. Please use the "Fix Admin RLS Policy" button on the Diagnostic page first.'
+          );
+        }
+        
+        // Nếu lỗi liên quan đến foreign key - có thể user đã tồn tại trong auth.users 
+        // nhưng không có trong admin_users
+        if (adminError.message?.includes('violates foreign key constraint')) {
+          throw new Error(
+            `Không thể tạo tài khoản. User ID đã tồn tại nhưng không có quyền admin. Vui lòng sử dụng email khác.`
+          );
+        }
+        
+        throw adminError;
+      }
+
+      // Display temporary password to admin
+      alert(`${newUserRole === 'admin' ? 'Admin' : 'Staff'} user created! Temporary password: ${tempPassword}\n\nPlease save this password and share it with the new user.`);
 
       setNewAdminEmail('');
+      setNewUserRole('admin');
+      setSelectedPermissions(['orders', 'inventory', 'phone_models', 'case_types']);
       setShowAddForm(false);
       fetchAdmins();
     } catch (err: any) {
@@ -2086,12 +2188,49 @@ function AdminUsers() {
   }
 
   async function handleDeleteAdmin(adminId: string) {
-    if (!confirm('Are you sure you want to delete this admin?')) return;
+    if (!confirm('Are you sure you want to delete this user?')) return;
 
     try {
+      // First check if the user is not the currently authenticated user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user && user.id === adminId) {
+        setError('You cannot delete your own account.');
+        return;
+      }
+
+      // Try to delete from auth.users first
+      const { error: authError } = await supabase.rpc('delete_admin_user', { user_id: adminId });
+
+      if (authError) {
+        // Fall back to just deleting from admin_users if delete_admin_user function doesn't exist
+        const { error } = await supabase
+          .from('admin_users')
+          .delete()
+          .eq('id', adminId);
+
+        if (error) throw error;
+      }
+      
+      fetchAdmins();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
+  async function handleToggleActive(adminId: string, currentStatus: boolean) {
+    try {
+      // Check if trying to deactivate own account
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user && user.id === adminId) {
+        setError('You cannot deactivate your own account.');
+        return;
+      }
+      
       const { error } = await supabase
         .from('admin_users')
-        .delete()
+        .update({ is_active: !currentStatus })
         .eq('id', adminId);
 
       if (error) throw error;
@@ -2101,8 +2240,71 @@ function AdminUsers() {
     }
   }
 
+  async function handleUpdatePermissions() {
+    if (!currentEditUser) return;
+    
+    try {
+      const { error } = await supabase
+        .from('admin_users')
+        .update({ permissions: currentEditPermissions })
+        .eq('id', currentEditUser.id);
+
+      if (error) throw error;
+      
+      setShowPermissionModal(false);
+      setCurrentEditUser(null);
+      setCurrentEditPermissions([]);
+      fetchAdmins();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    
+    if (newPassword !== confirmNewPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters long');
+      return;
+    }
+    
+    try {
+      if (!currentEditUser) return;
+      
+      // Update the user's password in Auth
+      const { error } = await supabase.rpc('admin_update_user_password', { 
+        user_id: currentEditUser.id,
+        new_password: newPassword
+      });
+      
+      if (error) throw error;
+      
+      alert('Password updated successfully');
+      setShowPasswordChangeModal(false);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setCurrentEditUser(null);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   function generateTemporaryPassword() {
-    return Math.random().toString(36).slice(-8);
+    // Generate a more secure password with letters, numbers, and special characters
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    let password = '';
+    
+    // Generate at least 10 characters
+    for (let i = 0; i < 10; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    
+    return password;
   }
 
   return (
@@ -2114,7 +2316,7 @@ function AdminUsers() {
           className="flex items-center gap-2 bg-black text-white px-4 py-2 rounded-lg hover:bg-gray-800"
         >
           <Plus className="w-4 h-4" />
-          Add Admin
+          Add User
         </button>
       </div>
 
@@ -2138,7 +2340,7 @@ function AdminUsers() {
 
       {showAddForm && (
         <div className="bg-white p-6 rounded-xl shadow-sm">
-          <h3 className="text-lg font-semibold mb-4">Add New Admin</h3>
+          <h3 className="text-lg font-semibold mb-4">Add New User</h3>
           <form onSubmit={handleAddAdmin} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2152,12 +2354,55 @@ function AdminUsers() {
                 required
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Role
+              </label>
+              <select
+                value={newUserRole}
+                onChange={handleRoleChange}
+                className="w-full p-2 border rounded-lg"
+              >
+                <option value="admin">Admin</option>
+                <option value="staff">Staff</option>
+              </select>
+            </div>
+            
+            {newUserRole === 'staff' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Permissions
+                </label>
+                <div className="space-y-2 bg-gray-50 p-3 rounded-lg">
+                  {availablePermissions.map(permission => (
+                    <label key={permission.id} className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedPermissions.includes(permission.id)}
+                        onChange={() => handlePermissionChange(permission.id)}
+                        className="mr-2 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      />
+                      {permission.label}
+                    </label>
+                  ))}
+                </div>
+                {selectedPermissions.length === 0 && (
+                  <p className="text-red-500 text-sm mt-1">Please select at least one permission</p>
+                )}
+              </div>
+            )}
+            
             <div className="flex gap-2">
               <button
                 type="submit"
-                className="bg-black text-white px-4 py-2 rounded-lg hover:bg-gray-800"
+                disabled={newUserRole === 'staff' && selectedPermissions.length === 0}
+                className={`px-4 py-2 rounded-lg ${
+                  newUserRole === 'staff' && selectedPermissions.length === 0 
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                    : 'bg-black text-white hover:bg-gray-800'
+                }`}
               >
-                Add Admin
+                Add User
               </button>
               <button
                 type="button"
@@ -2181,6 +2426,8 @@ function AdminUsers() {
                 <tr className="border-b">
                   <th className="text-left py-3">Email</th>
                   <th className="text-left py-3">Role</th>
+                  <th className="text-left py-3">Status</th>
+                  <th className="text-left py-3">Permissions</th>
                   <th className="text-left py-3">Created At</th>
                   <th className="text-left py-3">Actions</th>
                 </tr>
@@ -2190,18 +2437,83 @@ function AdminUsers() {
                   <tr key={admin.id} className="border-b">
                     <td className="py-3">{admin.email}</td>
                     <td className="py-3">
-                      <span className="px-2 py-1 bg-gray-100 rounded-full text-xs">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        admin.role === 'admin' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
                         {admin.role}
                       </span>
+                    </td>
+                    <td className="py-3">
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        admin.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      }`}>
+                        {admin.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="py-3">
+                      {admin.role === 'admin' ? (
+                        <span className="text-xs">All permissions</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {Array.isArray(admin.permissions) && admin.permissions.map((perm: string) => (
+                            <span key={perm} className="px-2 py-1 bg-gray-100 rounded-full text-xs">
+                              {availablePermissions.find(p => p.id === perm)?.label || perm}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3">
                       {new Date(admin.created_at).toLocaleDateString()}
                     </td>
                     <td className="py-3">
                       <div className="flex gap-2">
+                        {admin.role === 'staff' && (
+                          <button
+                            onClick={() => {
+                              setCurrentEditUser(admin);
+                              setCurrentEditPermissions(Array.isArray(admin.permissions) ? [...admin.permissions] : []);
+                              setShowPermissionModal(true);
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded text-blue-500"
+                            title="Edit Permissions"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            setCurrentEditUser(admin);
+                            setShowPasswordChangeModal(true);
+                          }}
+                          className="p-1 hover:bg-gray-100 rounded text-gray-500"
+                          title="Change Password"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleToggleActive(admin.id, admin.is_active)}
+                          className={`p-1 hover:bg-gray-100 rounded ${
+                            admin.is_active ? 'text-red-500' : 'text-green-500'
+                          }`}
+                          title={admin.is_active ? 'Deactivate' : 'Activate'}
+                        >
+                          {admin.is_active ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          )}
+                        </button>
                         <button
                           onClick={() => handleDeleteAdmin(admin.id)}
                           className="p-1 hover:bg-gray-100 rounded text-red-500"
+                          title="Delete"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -2214,6 +2526,135 @@ function AdminUsers() {
           )}
         </div>
       </div>
+
+      {/* Permission Edit Modal */}
+      {showPermissionModal && currentEditUser && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold mb-4">Edit Permissions for {currentEditUser.email}</h3>
+            
+            <div className="bg-gray-50 p-4 rounded-lg mb-6">
+              <div className="grid grid-cols-2 gap-3">
+                {availablePermissions.map(permission => (
+                  <label key={permission.id} className="flex items-center bg-white p-3 rounded border hover:bg-gray-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={currentEditPermissions.includes(permission.id)}
+                      onChange={() => handleEditPermissionChange(permission.id)}
+                      className="mr-2 h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="font-medium">{permission.label}</div>
+                      <div className="text-xs text-gray-500">
+                        {permission.id === 'orders' && 'Manage customer orders'}
+                        {permission.id === 'inventory' && 'Manage product inventory'}
+                        {permission.id === 'phone_models' && 'Manage phone models'}
+                        {permission.id === 'case_types' && 'Manage case types'}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              
+              {currentEditPermissions.length === 0 && (
+                <p className="text-red-500 text-sm mt-3">Please select at least one permission</p>
+              )}
+            </div>
+            
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowPermissionModal(false);
+                  setCurrentEditUser(null);
+                  setCurrentEditPermissions([]);
+                }}
+                className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdatePermissions}
+                disabled={currentEditPermissions.length === 0}
+                className={`px-4 py-2 rounded-lg ${
+                  currentEditPermissions.length === 0
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-black text-white hover:bg-gray-800'
+                }`}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Change Modal */}
+      {showPasswordChangeModal && currentEditUser && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold mb-4">Change Password for {currentEditUser.email}</h3>
+            
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full p-2 border rounded-lg"
+                  minLength={6}
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirm Password
+                </label>
+                <input
+                  type="password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  className="w-full p-2 border rounded-lg"
+                  minLength={6}
+                  required
+                />
+                {newPassword !== confirmNewPassword && confirmNewPassword && (
+                  <p className="text-red-500 text-sm mt-1">Passwords do not match</p>
+                )}
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPasswordChangeModal(false);
+                    setCurrentEditUser(null);
+                    setNewPassword('');
+                    setConfirmNewPassword('');
+                  }}
+                  className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newPassword || !confirmNewPassword || newPassword !== confirmNewPassword}
+                  className={`px-4 py-2 rounded-lg ${
+                    !newPassword || !confirmNewPassword || newPassword !== confirmNewPassword
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-black text-white hover:bg-gray-800'
+                  }`}
+                >
+                  Change Password
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2546,17 +2987,177 @@ function CaseTypes() {
   );
 }
 
+function AccessDenied() {
+  return (
+    <div className="p-8 text-center">
+      <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-red-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+      </svg>
+      <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
+      <p className="text-gray-600 mb-6">
+        You do not have permission to access this section.
+      </p>
+    </div>
+  );
+}
+
+function AdminWelcome() {
+  return (
+    <div className="p-8 text-center">
+      <h2 className="text-2xl font-bold mb-4">Chào mừng đến với Trang Quản Trị</h2>
+      <p className="text-gray-600 mb-6">
+        Vui lòng chọn một mục từ menu để bắt đầu làm việc.
+      </p>
+      <div className="mt-8 p-4 bg-yellow-50 rounded-lg text-yellow-800">
+        <p>Lưu ý: Bạn chỉ thấy các menu mà bạn có quyền truy cập.</p>
+      </div>
+    </div>
+  );
+}
+
 export function Admin() {
   const location = useLocation();
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
+  useEffect(() => {
+    async function fetchCurrentUser() {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (user) {
+          // Fetch admin info
+          const { data, error } = await supabase
+            .from('admin_users')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+            
+          if (error) {
+            console.error('Error fetching admin info:', error);
+            return;
+          }
+          
+          setCurrentUser(data);
+        }
+      } catch (err) {
+        console.error('Error fetching current user:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchCurrentUser();
+  }, []);
+  
+  // Check if user has permission for a specific section
+  const hasPermission = (section: string): boolean => {
+    if (!currentUser) return false;
+    
+    // Admin role has access to everything
+    if (currentUser.role === 'admin') {
+      return true;
+    }
+    
+    // Staff role with permissions
+    if (currentUser.role === 'staff' && currentUser.is_active) {
+      // For staff, check the permissions array
+      return Array.isArray(currentUser.permissions) && 
+        currentUser.permissions.includes(section);
+    }
+    
+    return false;
+  };
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPasswordError(null);
+    
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+    
+    if (newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters long');
+      return;
+    }
+    
+    try {
+      // Sử dụng Supabase Auth API để thay đổi mật khẩu
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+      
+      if (error) throw error;
+      
+      // Clear form and close modal
+      setNewPassword('');
+      setConfirmPassword('');
+      setShowPasswordModal(false);
+      
+      alert('Password updated successfully');
+    } catch (err: any) {
+      setPasswordError(err.message);
+    }
+  }
+
+  // Define navigation based on permissions
   const navigation = [
-    { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-    { name: 'Orders', path: '/admin/orders', icon: ShoppingBag },
-    { name: 'Inventory', path: '/admin/inventory', icon: PackageSearch },
-    { name: 'Phone Models', path: '/admin/phone-models', icon: Phone },
-    { name: 'Case Types', path: '/admin/case-types', icon: PackageSearch },
-    { name: 'Admin Users', path: '/admin/admins', icon: Users }
+    ...(hasPermission('orders') ? [{ name: 'Dashboard', path: '/admin', icon: LayoutDashboard, requiredRole: 'admin' }] : []),
+    ...(hasPermission('orders') ? [{ name: 'Orders', path: '/admin/orders', icon: ShoppingBag }] : []),
+    ...(hasPermission('inventory') ? [{ name: 'Inventory', path: '/admin/inventory', icon: PackageSearch }] : []),
+    ...(hasPermission('phone_models') ? [{ name: 'Phone Models', path: '/admin/phone-models', icon: Phone }] : []),
+    ...(hasPermission('case_types') ? [{ name: 'Case Types', path: '/admin/case-types', icon: PackageSearch }] : []),
+    ...(hasPermission('orders') ? [{ name: 'Admin Users', path: '/admin/admins', icon: Users, requiredRole: 'admin' }] : [])
   ];
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader className="animate-spin h-10 w-10 text-black" />
+      </div>
+    );
+  }
+
+  // If user doesn't have any permissions, show an error message
+  if (!loading && (!currentUser || !currentUser.is_active || 
+     (currentUser.role === 'staff' && 
+      (!Array.isArray(currentUser.permissions) || currentUser.permissions.length === 0)))) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-lg shadow-sm max-w-md w-full text-center">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-red-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
+          <p className="text-gray-600 mb-6">
+            {!currentUser.is_active 
+              ? 'Your account has been deactivated. Please contact an administrator.'
+              : 'You do not have permission to access the admin panel.'}
+          </p>
+          <button 
+            onClick={async () => {
+              await supabase.auth.signOut();
+              window.location.href = '/admin/login';
+            }}
+            className="bg-black text-white px-4 py-2 rounded-lg hover:bg-gray-800"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Filter visible routes based on user role
+  const visibleNavigation = navigation.filter(item => 
+    !item.requiredRole || item.requiredRole === currentUser?.role
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -2564,9 +3165,39 @@ export function Admin() {
         <div className="flex gap-8">
           {/* Sidebar */}
           <div className="w-64 flex-shrink-0">
+            <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
+              <div className="text-sm text-gray-500 mb-2">Logged in as:</div>
+              <div className="font-medium mb-1">{currentUser?.email}</div>
+              <div className="text-xs mb-4">
+                <span className={`inline-block px-2 py-0.5 rounded-full ${
+                  currentUser?.role === 'admin' 
+                    ? 'bg-blue-100 text-blue-800' 
+                    : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {currentUser?.role}
+                </span>
+              </div>
+              <div className="flex flex-col space-y-2">
+                <button
+                  onClick={() => setShowPasswordModal(true)}
+                  className="w-full text-sm bg-gray-100 text-gray-700 px-3 py-1 rounded hover:bg-gray-200 transition-colors"
+                >
+                  Change Password
+                </button>
+                <button
+                  onClick={async () => {
+                    await supabase.auth.signOut();
+                    window.location.href = '/admin/login';
+                  }}
+                  className="w-full text-sm bg-gray-100 text-gray-700 px-3 py-1 rounded hover:bg-gray-200 transition-colors"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
             <div className="bg-white rounded-xl shadow-sm p-4">
               <nav className="space-y-1">
-                {navigation.map((item) => {
+                {visibleNavigation.map((item) => {
                   const Icon = item.icon;
                   const isActive = location.pathname === item.path;
                   return (
@@ -2590,18 +3221,101 @@ export function Admin() {
 
           {/* Main Content */}
           <div className="flex-1">
-            <Routes>
-              <Route path="" element={<Dashboard />} />
-              <Route path="orders" element={<Orders />} />
-              <Route path="orders/:orderId" element={<OrderDetail />} />
-              <Route path="inventory" element={<Inventory />} />
-              <Route path="phone-models" element={<PhoneModels />} />
-              <Route path="case-types" element={<CaseTypes />} />
-              <Route path="admins" element={<AdminUsers />} />
-            </Routes>
+            <div className="bg-white rounded-xl shadow-sm p-6">
+              <Routes>
+                <Route index element={
+                  currentUser?.role === 'admin' ? <Dashboard /> : 
+                  hasPermission('orders') ? <Orders /> :
+                  hasPermission('inventory') ? <Inventory /> :
+                  hasPermission('phone_models') ? <PhoneModels /> :
+                  hasPermission('case_types') ? <CaseTypes /> :
+                  <AdminWelcome />
+                } />
+                <Route path="orders" element={hasPermission('orders') ? <Orders /> : <AccessDenied />} />
+                <Route path="orders/:orderId" element={hasPermission('orders') ? <OrderDetail /> : <AccessDenied />} />
+                <Route path="inventory" element={hasPermission('inventory') ? <Inventory /> : <AccessDenied />} />
+                <Route path="phone-models" element={hasPermission('phone_models') ? <PhoneModels /> : <AccessDenied />} />
+                <Route path="case-types" element={hasPermission('case_types') ? <CaseTypes /> : <AccessDenied />} />
+                <Route path="admins" element={currentUser?.role === 'admin' ? <AdminUsers /> : <AccessDenied />} />
+              </Routes>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold mb-4">Change Your Password</h3>
+            
+            {passwordError && (
+              <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg">
+                {passwordError}
+              </div>
+            )}
+            
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full p-2 border rounded-lg"
+                  minLength={6}
+                  required
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirm Password
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full p-2 border rounded-lg"
+                  minLength={6}
+                  required
+                />
+                {newPassword !== confirmPassword && confirmPassword && (
+                  <p className="text-red-500 text-sm mt-1">Passwords do not match</p>
+                )}
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPasswordModal(false);
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setPasswordError(null);
+                  }}
+                  className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newPassword || !confirmPassword || newPassword !== confirmPassword}
+                  className={`px-4 py-2 rounded-lg ${
+                    !newPassword || !confirmPassword || newPassword !== confirmPassword
+                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      : 'bg-black text-white hover:bg-gray-800'
+                  }`}
+                >
+                  Change Password
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

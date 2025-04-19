@@ -176,6 +176,35 @@ export function Diagnostic() {
             </div>
           </div>
           
+          <div className="mb-8">
+            <h2 className="text-xl font-semibold mb-4">Admin Tools</h2>
+            <div className="bg-yellow-50 p-4 rounded-lg mb-4">
+              <p className="text-yellow-700 mb-2">
+                <strong>Warning:</strong> These tools modify database settings directly.
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  // Execute raw SQL to add the RLS policy
+                  const { error } = await supabase.rpc('add_admin_rls_policy');
+                  
+                  if (error) {
+                    alert(`Error: ${error.message}`);
+                  } else {
+                    alert('Admin RLS policy added successfully!');
+                  }
+                } catch (err) {
+                  console.error('Error adding policy:', err);
+                  alert(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                }
+              }}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Fix Admin RLS Policy
+            </button>
+          </div>
+          
           <div>
             <h2 className="text-xl font-semibold mb-4">Application Info</h2>
             <div className="bg-gray-100 p-4 rounded">

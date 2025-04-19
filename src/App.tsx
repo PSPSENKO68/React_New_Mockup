@@ -22,6 +22,8 @@ import { VNPayReturn } from './components/VNPayReturn';
 import { ForgotPassword } from './pages/Account/ForgotPassword';
 import { ResetPassword } from './pages/Account/ResetPassword';
 import { Toaster } from 'react-hot-toast';
+import { AdminForgotPassword } from './pages/AdminForgotPassword';
+import { AdminResetPassword } from './pages/AdminResetPassword';
 
 function App() {
   const location = useLocation();
@@ -45,6 +47,8 @@ function App() {
             <Route path="/payment" element={<Payment />} />
             <Route path="/payment/vnpay-return" element={<VNPayReturn />} />
             <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin/forgot-password" element={<AdminForgotPassword />} />
+            <Route path="/admin/reset-password" element={<AdminResetPassword />} />
             <Route path="/diagnostic" element={<Diagnostic />} />
             <Route path="/order-confirmation/:orderId" element={<OrderConfirmation />} />
             
